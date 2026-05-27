@@ -1,1 +1,19 @@
-*.exe
+# Windows Local Utilities
+ffmpeg.exe
+
+# Python Cache & Builds
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.venv/
+venv/
+ENV/
+env/
+
+# Editor Settings & OS Files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
