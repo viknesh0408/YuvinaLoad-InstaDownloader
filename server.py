@@ -148,6 +148,7 @@ def run_download_task(task_id, vid, fmt, quality):
     cookies_args = ['--cookies', COOKIES_PATH] if COOKIES_PATH else []
     out_tmpl = os.path.join(tmpdir, 'YuvinaLoad_%(title)s.%(ext)s')
     cmd = YTDLP + cookies_args + [
+        '--no-config',
         '-f', yt_fmt,
         '-o', out_tmpl,
         '--no-playlist',
@@ -291,7 +292,7 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
         try:
             cookies_args = ['--cookies', COOKIES_PATH] if COOKIES_PATH else []
             r = subprocess.run(
-                YTDLP + cookies_args + ['--dump-json', '--no-playlist', '--skip-download',
+                YTDLP + cookies_args + ['--no-config', '-f', 'best', '--dump-json', '--no-playlist', '--skip-download',
                           f'https://www.youtube.com/watch?v={vid}'],
                 capture_output=True, text=True, timeout=40
             )
