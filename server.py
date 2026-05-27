@@ -292,7 +292,15 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
                 capture_output=True, text=True, timeout=40
             )
             if r.returncode != 0:
-                self.json({'error': 'Video unavailable or private'}, 404); return
+                print(f"[YuvinaLoad Error] yt-dlp stderr: {r.stderr}")
+                err_msg = "Video unavailable, private, or blocked by YouTube"
+                if "429" in r.stderr or "Too Many Requests" in r.stderr:
+                    err_msg = "YouTube rate-limited this server IP (HTTP 429)"
+                elif "Sign in" in r.stderr:
+                    err_msg = "YouTube blocked this hosting provider (Bot detection)"
+                
+                details = r.stderr.strip().split('\n')[-1] if r.stderr else "Unknown error"
+                self.json({'error': f"{err_msg}. Details: {details}"}, 404); return
 
             d = json.loads(r.stdout)
             self.json({
