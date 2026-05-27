@@ -8,7 +8,7 @@
 //  Detect if running via server
 //  (localhost) or file://
 // ══════════════════════════════
-const IS_SERVER = ['localhost', '127.0.0.1'].includes(location.hostname);
+const IS_SERVER = ['http:', 'https:'].includes(location.protocol);
 
 // ══════════════════════════════
 //  DOM References
