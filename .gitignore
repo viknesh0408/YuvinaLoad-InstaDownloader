@@ -1,5 +1,6 @@
 # Windows Local Utilities
 ffmpeg.exe
+cookies.txt
 
 # Python Cache & Builds
 __pycache__/

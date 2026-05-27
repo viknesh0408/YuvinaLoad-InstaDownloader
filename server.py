@@ -25,6 +25,8 @@ YTDLP   = None   # resolved at startup
 
 # Global dictionary to hold active and completed download tasks
 DOWNLOAD_TASKS = {}
+COOKIES_PATH   = None
+
 
 
 # ── Locate yt-dlp ──────────────────────────────────────
@@ -143,8 +145,9 @@ def run_download_task(task_id, vid, fmt, quality):
     task["temp_dir_obj"] = tmpdir_obj
     tmpdir = tmpdir_obj.name
 
+    cookies_args = ['--cookies', COOKIES_PATH] if COOKIES_PATH else []
     out_tmpl = os.path.join(tmpdir, 'YuvinaLoad_%(title)s.%(ext)s')
-    cmd = YTDLP + [
+    cmd = YTDLP + cookies_args + [
         '-f', yt_fmt,
         '-o', out_tmpl,
         '--no-playlist',
@@ -286,8 +289,9 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
             self.json({'error': 'yt-dlp not found'}, 500); return
 
         try:
+            cookies_args = ['--cookies', COOKIES_PATH] if COOKIES_PATH else []
             r = subprocess.run(
-                YTDLP + ['--dump-json', '--no-playlist', '--skip-download',
+                YTDLP + cookies_args + ['--dump-json', '--no-playlist', '--skip-download',
                           f'https://www.youtube.com/watch?v={vid}'],
                 capture_output=True, text=True, timeout=40
             )
@@ -423,7 +427,33 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
 #  Entry Point
 # ══════════════════════════════════════════════════════
 def main():
-    global YTDLP
+    global YTDLP, COOKIES_PATH
+
+    # Load cookies from environment variables or local file
+    env_cookies = os.environ.get('YOUTUBE_COOKIES')
+    if env_cookies:
+        try:
+            # Write environment cookies to a temporary file
+            temp_cookies = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt')
+            temp_cookies.write(env_cookies)
+            temp_cookies.close()
+            COOKIES_PATH = temp_cookies.name
+            print(f"  [Cookies] Loaded cookies from YOUTUBE_COOKIES environment variable!")
+            
+            # Clean up temp file on shutdown
+            import atexit
+            def cleanup_cookies():
+                if os.path.exists(temp_cookies.name):
+                    try: os.remove(temp_cookies.name)
+                    except: pass
+            atexit.register(cleanup_cookies)
+        except Exception as e:
+            print(f"  [Cookies] ❌ Failed to write YOUTUBE_COOKIES: {e}")
+    else:
+        local_cookies = os.path.join(WEBROOT, 'cookies.txt')
+        if os.path.exists(local_cookies):
+            COOKIES_PATH = local_cookies
+            print("  [Cookies] Loaded cookies from local cookies.txt file!")
 
     # Reconfigure stdout/stderr to UTF-8 on Windows to prevent UnicodeEncodeError
     if sys.platform.startswith('win'):
