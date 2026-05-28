@@ -89,9 +89,8 @@ if (!IS_SERVER) {
 //  Quality Options Per Format
 // ══════════════════════════════
 const qualityOptions = {
-  mp4:  ['2160p (4K)', '1080p (FHD)', '720p (HD)', '480p', '360p', '144p'],
+  mp4:  ['1080p (FHD)', '720p (HD)', '480p', '360p'],
   mp3:  ['320 kbps', '256 kbps', '192 kbps', '128 kbps'],
-  webm: ['1080p', '720p', '480p', '360p'],
   jpg:  ['Best Quality (Original)'],
 };
 
@@ -141,24 +140,7 @@ if (statsEl) statsObs.observe(statsEl);
   }
 })();
 
-// ══════════════════════════════
-//  Extract YouTube Video ID
-// ══════════════════════════════
-function extractVideoId(url) {
-  try {
-    const u = new URL(url.trim());
-    if (u.hostname === 'youtu.be') return u.pathname.slice(1).split('?')[0];
-    if (u.hostname.includes('youtube.com')) {
-      if (u.pathname === '/watch')           return u.searchParams.get('v');
-      if (u.pathname.startsWith('/shorts/')) return u.pathname.split('/')[2];
-      if (u.pathname.startsWith('/embed/'))  return u.pathname.split('/')[2];
-    }
-  } catch {
-    const m = url.match(/(?:v=|youtu\.be\/|shorts\/|embed\/)([A-Za-z0-9_-]{11})/);
-    return m ? m[1] : null;
-  }
-  return null;
-}
+
 
 // ══════════════════════════════
 //  Format helpers
@@ -261,27 +243,14 @@ async function fetchVideoInfo(urlOrId) {
       type:      data.type || 'video',
     };
   }
-  // Fallback: oEmbed (works without server, metadata only)
-  if (urlOrId.includes('instagram.com')) {
-    return {
-      title:     'Instagram Media',
-      channel:   'Instagram Creator',
-      duration:  null,
-      views:     null,
-      thumbnail: 'https://cdn-icons-png.flaticon.com/512/174/174855.png',
-      type:      'video',
-    };
-  }
-  const ytId = extractVideoId(urlOrId) || urlOrId;
-  const d = await safeFetchJson(
-    `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${ytId}&format=json`
-  );
+  // Fallback (works without server, metadata only)
   return {
-    title:    d.title       || 'Unknown Title',
-    channel:  d.author_name || 'Unknown Channel',
-    duration: null, views: null,
-    thumbnail: `https://img.youtube.com/vi/${ytId}/maxresdefault.jpg`,
-    type:     'video',
+    title:     'Instagram Media',
+    channel:   'Instagram Creator',
+    duration:  null,
+    views:     null,
+    thumbnail: 'https://cdn-icons-png.flaticon.com/512/174/174855.png',
+    type:      'video',
   };
 }
 
@@ -290,13 +259,12 @@ async function fetchVideoInfo(urlOrId) {
 // ══════════════════════════════
 async function handleFetch() {
   const url = videoUrlInput.value.trim();
-  if (!url)  { showStatus('Please paste a YouTube or Instagram URL first.'); videoPreview.classList.add('d-none'); return; }
+  if (!url)  { showStatus('Please paste an Instagram URL first.'); videoPreview.classList.add('d-none'); return; }
   
-  let isYouTube = url.includes('youtube.com') || url.includes('youtu.be') || extractVideoId(url);
   let isInstagram = url.includes('instagram.com');
   
-  if (!isYouTube && !isInstagram) {
-    showStatus('Unsupported URL. Please check your link and try again.');
+  if (!isInstagram) {
+    showStatus('Please paste a valid Instagram URL (e.g. instagram.com/p/... or instagram.com/reel/...).');
     videoPreview.classList.add('d-none');
     return;
   }
@@ -316,45 +284,31 @@ async function handleFetch() {
     previewDuration.textContent = fmtDuration(info.duration);
     previewViews.textContent    = fmtViews(info.views);
     previewThumb.onerror = () => { 
-      previewThumb.src = isInstagram 
-        ? 'https://cdn-icons-png.flaticon.com/512/174/174855.png' 
-        : `https://img.youtube.com/vi/${extractVideoId(url)}/hqdefault.jpg`; 
+      previewThumb.src = 'https://cdn-icons-png.flaticon.com/512/174/174855.png';
     };
 
     const isImage = info.type === 'image';
     const previewBadge = document.getElementById('previewBadge');
     if (previewBadge) {
-      if (isInstagram) {
-        previewBadge.textContent = isImage ? 'Instagram Photo' : 'Instagram Video/Reel';
-      } else {
-        previewBadge.textContent = 'YouTube Video';
-      }
+      previewBadge.textContent = isImage ? 'Instagram Photo' : 'Instagram Video/Reel';
     }
 
     const tabMp4 = document.querySelector('.format-tab[data-type="mp4"]');
     const tabMp3 = document.querySelector('.format-tab[data-type="mp3"]');
-    const tabWebm = document.querySelector('.format-tab[data-type="webm"]');
     const tabJpg = document.getElementById('tabJpg');
 
     if (isImage) {
       if (tabMp4) tabMp4.classList.add('d-none');
       if (tabMp3) tabMp3.classList.add('d-none');
-      if (tabWebm) tabWebm.classList.add('d-none');
       if (tabJpg) tabJpg.classList.remove('d-none');
       selectedFormat = 'jpg';
     } else {
       if (tabMp4) tabMp4.classList.remove('d-none');
       if (tabMp3) tabMp3.classList.remove('d-none');
-      if (isInstagram) {
-        if (tabWebm) tabWebm.classList.add('d-none');
-      } else {
-        if (tabWebm) tabWebm.classList.remove('d-none');
-      }
       if (tabJpg) tabJpg.classList.add('d-none');
 
       const savedFormat = localStorage.getItem('yuvina_format') || 'mp4';
       selectedFormat = ['mp4', 'mp3'].includes(savedFormat) ? savedFormat : 'mp4';
-      if (!isInstagram && savedFormat === 'webm') selectedFormat = 'webm';
     }
 
     document.querySelectorAll('.format-tab').forEach(t => t.classList.toggle('active', t.dataset.type === selectedFormat));
@@ -377,7 +331,7 @@ videoUrlInput.addEventListener('keydown', e => { if (e.key === 'Enter') handleFe
 videoUrlInput.addEventListener('paste', () => {
   setTimeout(() => {
     const val = videoUrlInput.value.trim();
-    if (val.includes('youtube.com') || val.includes('youtu.be') || val.includes('instagram.com') || extractVideoId(val)) {
+    if (val.includes('instagram.com')) {
       handleFetch();
     }
   }, 100);
