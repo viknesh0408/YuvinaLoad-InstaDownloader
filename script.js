@@ -21,8 +21,6 @@ const videoPreview    = document.getElementById('videoPreview');
 const previewThumb    = document.getElementById('previewThumb');
 const previewTitle    = document.getElementById('previewTitle');
 const previewChannel  = document.getElementById('previewChannel');
-const previewDuration = document.getElementById('previewDuration');
-const previewViews    = document.getElementById('previewViews');
 const qualityGrid     = document.getElementById('qualityGrid');
 const downloadBtn     = document.getElementById('downloadBtn');
 const dlProgressFill  = document.getElementById('dlProgressFill');
@@ -89,12 +87,9 @@ if (!IS_SERVER) {
 //  Quality Options Per Format
 // ══════════════════════════════
 const qualityOptions = {
-  mp4:  ['1080p (FHD)', '720p (HD)', '480p', '360p'],
-  mp3:  ['320 kbps', '256 kbps', '192 kbps', '128 kbps'],
+  mp4:  ['Best Quality (Original)'],
   jpg:  ['Best Quality (Original)'],
 };
-
-// Navbar Scroll and Active state handled by unified scroll listener at the bottom.
 
 // ══════════════════════════════
 //  Animated Stat Counters
@@ -140,24 +135,6 @@ if (statsEl) statsObs.observe(statsEl);
   }
 })();
 
-
-
-// ══════════════════════════════
-//  Format helpers
-// ══════════════════════════════
-function fmtDuration(s) {
-  if (!s) return '—';
-  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
-  return h ? `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}` : `${m}:${String(sec).padStart(2,'0')}`;
-}
-function fmtViews(n) {
-  if (!n) return '—';
-  if (n >= 1e9) return (n/1e9).toFixed(1)+'B views';
-  if (n >= 1e6) return (n/1e6).toFixed(1)+'M views';
-  if (n >= 1e3) return (n/1e3).toFixed(1)+'K views';
-  return n+' views';
-}
-
 // ══════════════════════════════
 //  Status bar
 // ══════════════════════════════
@@ -196,11 +173,9 @@ async function safeFetchJson(url, options = {}) {
     }
     return data;
   } catch (err) {
-    // If it's already a descriptive error, rethrow it
     if (err.message && (err.message.includes('downloader server is not running') || err.message.includes('non-JSON content'))) {
       throw err;
     }
-    // Network or other error
     throw new Error(`Failed to communicate with downloader server: ${err.message || err}`);
   }
 }
@@ -228,8 +203,6 @@ function renderQualities(format) {
 
 // ══════════════════════════════
 //  Fetch video info
-//  • Localhost → /api/info (yt-dlp, full metadata)
-//  • file://   → YouTube oEmbed (basic, no download)
 // ══════════════════════════════
 async function fetchVideoInfo(urlOrId) {
   if (IS_SERVER) {
@@ -243,15 +216,18 @@ async function fetchVideoInfo(urlOrId) {
       type:      data.type || 'video',
     };
   }
-  // Fallback (works without server, metadata only)
-  return {
-    title:     'Instagram Media',
-    channel:   'Instagram Creator',
-    duration:  null,
-    views:     null,
-    thumbnail: 'https://cdn-icons-png.flaticon.com/512/174/174855.png',
-    type:      'video',
-  };
+  // Fallback: oEmbed mock for file:// protocol
+  if (urlOrId.includes('instagram.com')) {
+    return {
+      title:     'Instagram Media',
+      channel:   'Instagram Creator',
+      duration:  null,
+      views:     null,
+      thumbnail: 'https://cdn-icons-png.flaticon.com/512/174/174855.png',
+      type:      'video',
+    };
+  }
+  throw new Error('Unsupported URL. Only Instagram links are supported.');
 }
 
 // ══════════════════════════════
@@ -264,7 +240,7 @@ async function handleFetch() {
   let isInstagram = url.includes('instagram.com');
   
   if (!isInstagram) {
-    showStatus('Please paste a valid Instagram URL (e.g. instagram.com/p/... or instagram.com/reel/...).');
+    showStatus('Unsupported URL. Please check your link (must be an instagram.com link) and try again.');
     videoPreview.classList.add('d-none');
     return;
   }
@@ -281,10 +257,8 @@ async function handleFetch() {
     previewThumb.src            = info.thumbnail || '';
     previewTitle.textContent    = info.title;
     previewChannel.textContent  = info.channel;
-    previewDuration.textContent = fmtDuration(info.duration);
-    previewViews.textContent    = fmtViews(info.views);
     previewThumb.onerror = () => { 
-      previewThumb.src = 'https://cdn-icons-png.flaticon.com/512/174/174855.png';
+      previewThumb.src = 'https://cdn-icons-png.flaticon.com/512/174/174855.png'; 
     };
 
     const isImage = info.type === 'image';
@@ -294,28 +268,23 @@ async function handleFetch() {
     }
 
     const tabMp4 = document.querySelector('.format-tab[data-type="mp4"]');
-    const tabMp3 = document.querySelector('.format-tab[data-type="mp3"]');
     const tabJpg = document.getElementById('tabJpg');
 
     if (isImage) {
       if (tabMp4) tabMp4.classList.add('d-none');
-      if (tabMp3) tabMp3.classList.add('d-none');
       if (tabJpg) tabJpg.classList.remove('d-none');
       selectedFormat = 'jpg';
     } else {
       if (tabMp4) tabMp4.classList.remove('d-none');
-      if (tabMp3) tabMp3.classList.remove('d-none');
       if (tabJpg) tabJpg.classList.add('d-none');
-
-      const savedFormat = localStorage.getItem('yuvina_format') || 'mp4';
-      selectedFormat = ['mp4', 'mp3'].includes(savedFormat) ? savedFormat : 'mp4';
+      selectedFormat = 'mp4';
     }
 
     document.querySelectorAll('.format-tab').forEach(t => t.classList.toggle('active', t.dataset.type === selectedFormat));
     renderQualities(selectedFormat);
 
     videoPreview.classList.remove('d-none');
-    showStatus('✓ Media found! Choose your format and quality below.', 'success');
+    showStatus('✓ Media found! Choose your format below.', 'success');
   } catch (err) {
     showStatus(err.message || 'Something went wrong.');
     videoPreview.classList.add('d-none');
@@ -365,8 +334,8 @@ document.querySelectorAll('.format-tab').forEach(tab => {
 //  Download Button & Real-time Progress Polling
 // ══════════════════════════════
 downloadBtn.addEventListener('click', async () => {
-  if (!currentVideoId) { showToast('Please fetch a video first!'); return; }
-  if (!selectedQuality) { showToast('Please select a quality first!'); return; }
+  if (!currentVideoId) { showToast('Please fetch media first!'); return; }
+  if (!selectedQuality) { showToast('Please select a quality/format first!'); return; }
 
   // Must be running via server
   if (!IS_SERVER) {
@@ -412,7 +381,6 @@ downloadBtn.addEventListener('click', async () => {
       dlProgressText.textContent = '100%';
       document.getElementById('dlDetails').classList.add('d-none');
       
-      // Auto-hide modal on success after 1.5 seconds
       setTimeout(() => {
         modal.hide();
       }, 1500);
@@ -439,12 +407,10 @@ downloadBtn.addEventListener('click', async () => {
         const data = await safeFetchJson(`/api/download/status?task_id=${task_id}`);
         
         if (data.status === 'downloading') {
-          // Update progress bar & label
           dlProgressFill.style.width = data.progress + '%';
           dlProgressText.textContent = Math.round(data.progress) + '%';
           dlModalSub.textContent = data.phase || 'Downloading...';
           
-          // Speed & ETA
           if (data.speed && data.eta) {
             document.getElementById('dlDetails').classList.remove('d-none');
             document.getElementById('dlSpeed').innerHTML = `<i class="bi bi-speedometer2 me-1"></i> ${data.speed}`;
@@ -456,7 +422,6 @@ downloadBtn.addEventListener('click', async () => {
         else if (data.status === 'completed') {
           cleanupAndClose('success');
           
-          // Trigger the browser file download using the file streaming endpoint
           const fileUrl = `/api/download/file?task_id=${task_id}`;
           const a = document.createElement('a');
           a.href          = fileUrl;
@@ -507,12 +472,10 @@ let scrollTicking = false;
 window.addEventListener('scroll', () => {
   if (!scrollTicking) {
     window.requestAnimationFrame(() => {
-      // 1. Toggle scrolled class on navbar
       if (mainNav) {
         mainNav.classList.toggle('scrolled', window.scrollY > 60);
       }
 
-      // 2. Update active nav pill
       let cur = '';
       sections.forEach(s => { if (s.getBoundingClientRect().top <= 100) cur = s.id; });
       navPills.forEach(l => {

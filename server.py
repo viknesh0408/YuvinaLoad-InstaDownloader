@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 YuvinaLoad – Local Download Server
-Serves the frontend and downloads YouTube videos via yt-dlp.
+Serves the frontend and downloads Instagram media via yt-dlp.
 Run via start.bat or:  python server.py
 """
 
@@ -25,16 +25,11 @@ YTDLP   = None   # resolved at startup
 
 # Global dictionary to hold active and completed download tasks
 DOWNLOAD_TASKS  = {}
-COOKIES_PATH           = None
 COOKIES_BROWSER        = None
 INSTAGRAM_COOKIES_PATH = None
 
 def get_target_url(params):
     url_param = params.get('url', '')
-    if not url_param:
-        vid = params.get('id', '')
-        if vid:
-            url_param = f'https://www.youtube.com/watch?v={vid}'
     return url_param.strip()
 
 def normalize_cookies(raw_content):
@@ -42,8 +37,8 @@ def normalize_cookies(raw_content):
     if not raw_content:
         return ""
 
-    # Case 1: Netscape cookie format (even if mangled by space-separation or collapsed into a single line)
-    if raw_content.startswith("# Netscape") or raw_content.startswith("# HTTP Cookie") or ".youtube.com" in raw_content or "youtube.com" in raw_content:
+    # Case 1: Netscape cookie format
+    if raw_content.startswith("# Netscape") or raw_content.startswith("# HTTP Cookie") or ".instagram.com" in raw_content or "instagram.com" in raw_content:
         lines = []
         raw_lines = []
         if "\n" in raw_content:
@@ -97,7 +92,7 @@ def normalize_cookies(raw_content):
                 value = item.get("value")
                 if not name or value is None:
                     continue
-                domain = item.get("domain", ".youtube.com")
+                domain = item.get("domain", ".instagram.com")
                 path = item.get("path", "/")
                 secure = "TRUE" if item.get("secure", True) else "FALSE"
                 exp = item.get("expirationDate") or item.get("expiry") or default_exp
@@ -109,12 +104,12 @@ def normalize_cookies(raw_content):
         elif isinstance(data, dict):
             for name, value in data.items():
                 if name and value is not None:
-                    lines.append(f".youtube.com\tTRUE\t/\tTRUE\t{default_exp}\t{name}\t{value}")
+                    lines.append(f".instagram.com\tTRUE\t/\tTRUE\t{default_exp}\t{name}\t{value}")
             return "\n".join(lines) + "\n"
     except Exception:
         pass
 
-    # Case 3: Raw cookie header string (e.g. "SID=abc; HSID=def;") or standard HTTP Header
+    # Case 3: Raw cookie header string (e.g. "sessionid=abc; rur=def;") or standard HTTP Header
     header_content = raw_content
     if header_content.lower().startswith("cookie:"):
         header_content = header_content[7:].strip()
@@ -132,7 +127,7 @@ def normalize_cookies(raw_content):
             name = parts[0].strip()
             value = parts[1].strip()
             if name and value:
-                lines.append(f".youtube.com\tTRUE\t/\tTRUE\t{default_exp}\t{name}\t{value}")
+                lines.append(f".instagram.com\tTRUE\t/\tTRUE\t{default_exp}\t{name}\t{value}")
                 has_valid_pair = True
         if has_valid_pair:
             return "\n".join(lines) + "\n"
@@ -141,34 +136,19 @@ def normalize_cookies(raw_content):
     return raw_content
 
 def get_cookies_args(url=""):
-    if "instagram.com" in url:
-        if INSTAGRAM_COOKIES_PATH:
-            return ['--cookies', INSTAGRAM_COOKIES_PATH]
-        elif COOKIES_BROWSER:
-            return ['--cookies-from-browser', COOKIES_BROWSER]
-    else:
-        if COOKIES_PATH:
-            return ['--cookies', COOKIES_PATH]
-        elif COOKIES_BROWSER:
-            return ['--cookies-from-browser', COOKIES_BROWSER]
+    if INSTAGRAM_COOKIES_PATH:
+        return ['--cookies', INSTAGRAM_COOKIES_PATH]
+    elif COOKIES_BROWSER:
+        return ['--cookies-from-browser', COOKIES_BROWSER]
     return []
 
 def build_ytdlp_base_args(url=""):
     """Return common yt-dlp anti-bot and compatibility flags."""
-    args = [
+    return [
         '--no-check-certificates',
         '--add-header', 'Accept-Language:en-US,en;q=0.9',
         '--socket-timeout', '30',
     ]
-    if "instagram.com" in url:
-        return args
-
-    if not (COOKIES_PATH or COOKIES_BROWSER):
-        args += ['--extractor-args', 'youtube:player_client=android,android_vr']
-    return args
-
-
-
 
 # ── Locate yt-dlp ──────────────────────────────────────
 def find_ytdlp():
@@ -185,183 +165,9 @@ def find_ytdlp():
     except Exception:
         return None
 
-
-# ── Check if ffmpeg is available ───────────────────────
-def check_ffmpeg_available():
-    # 1. Check in PATH first
-    try:
-        subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True)
-        return True
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        pass
-    # 2. Check if local ffmpeg.exe exists in project root
-    local_ffmpeg = os.path.join(WEBROOT, 'ffmpeg.exe')
-    if os.path.exists(local_ffmpeg):
-        return True
-    return False
-
-
-# ── Download FFmpeg automatically if missing ───────────
-def download_ffmpeg():
-    import urllib.request
-    import zipfile
-    import io
-    
-    url = "https://github.com/ffbinaries/ffbinaries-prebuilt/releases/download/v4.4.1/ffmpeg-4.4.1-win-64.zip"
-    print('\n ╔════════════════════════════════════════════════════════╗')
-    print(' ║  FFmpeg is required for 1080p/4K merging & MP3 audio.  ║')
-    print(' ║  Downloading lightweight FFmpeg build (~18MB)...      ║')
-    print(' ╚════════════════════════════════════════════════════════╝\n')
-    try:
-        req = urllib.request.Request(
-            url, 
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        )
-        with urllib.request.urlopen(req, timeout=120) as response:
-            zip_data = response.read()
-        
-        print("  [FFmpeg] Extracting ffmpeg.exe...")
-        with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
-            z.extract("ffmpeg.exe", WEBROOT)
-        print("  [FFmpeg] ✅ FFmpeg installed successfully in project directory!\n")
-        return True
-    except Exception as e:
-        print(f"  [FFmpeg] ❌ Auto-install failed: {e}")
-        print("           Please download FFmpeg manually or try again.\n")
-        return False
-
-
-# ── Check if JS runtime is available for yt-dlp ────────
-def check_js_runtime_available():
-    # 1. Check if node or deno is in PATH (this includes temp directories if already added)
-    for cmd in ['deno', 'node']:
-        try:
-            subprocess.run([cmd, '--version'], capture_output=True, check=True)
-            return True
-        except Exception:
-            pass
-    # 2. Check if local deno exists in project root or temp directory
-    for d in [WEBROOT, tempfile.gettempdir()]:
-        local_deno = os.path.join(d, 'deno.exe' if sys.platform.startswith('win') else 'deno')
-        if os.path.exists(local_deno):
-            try:
-                subprocess.run([local_deno, '--version'], capture_output=True, check=True)
-                if d not in os.environ['PATH']:
-                    os.environ['PATH'] = d + os.pathsep + os.environ['PATH']
-                return True
-            except Exception:
-                pass
-    return False
-
-
-# ── Download Deno automatically if missing JS runtime ──
-def download_deno():
-    import urllib.request
-    import zipfile
-    import io
-    import stat
-
-    # Determine platform
-    if sys.platform.startswith('win'):
-        url = "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip"
-        dest_filename = "deno.exe"
-    elif sys.platform.startswith('darwin'):
-        url = "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-apple-darwin.zip"
-        dest_filename = "deno"
-    else:
-        # Assume linux x64
-        url = "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip"
-        dest_filename = "deno"
-
-    print('\n ╔════════════════════════════════════════════════════════╗')
-    print(' ║  yt-dlp requires a JS runtime (Deno) to sign players   ║')
-    print(' ║  and download high-quality videos without errors.     ║')
-    print(' ║  Downloading portable Deno binary (~30MB)...          ║')
-    print(' ╚════════════════════════════════════════════════════════╝\n')
-
-    try:
-        req = urllib.request.Request(
-            url, 
-            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        )
-        with urllib.request.urlopen(req, timeout=120) as response:
-            zip_data = response.read()
-        
-        # Try writing to WEBROOT first, fallback to temp directory if read-only filesystem
-        write_dirs = [WEBROOT, tempfile.gettempdir()]
-        success = False
-        
-        for write_dir in write_dirs:
-            try:
-                dest_path = os.path.join(write_dir, dest_filename)
-                print(f"  [Deno] Extracting binary to: {write_dir}...")
-                with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
-                    z.extract(dest_filename, write_dir)
-                
-                # On Linux/macOS, make the downloaded binary executable
-                if not sys.platform.startswith('win'):
-                    st = os.stat(dest_path)
-                    os.chmod(dest_path, st.st_mode | stat.S_IEXEC)
-                
-                # Test execution of Deno to verify it runs
-                subprocess.run([dest_path, '--version'], capture_output=True, check=True)
-                
-                # Add this directory to PATH if not already there
-                if write_dir not in os.environ['PATH']:
-                    os.environ['PATH'] = write_dir + os.pathsep + os.environ['PATH']
-                
-                print(f"  [Deno] ✅ Deno installed successfully in {write_dir}!\n")
-                success = True
-                break
-            except Exception as ex:
-                print(f"  [Deno] ⚠  Failed to install in {write_dir}: {ex}")
-                continue
-                
-        return success
-    except Exception as e:
-        print(f"  [Deno] ❌ Auto-install failed: {e}")
-        print("         yt-dlp might fail to download some formats.\n")
-        return False
-
-
-
-# ── Quality string → yt-dlp format ────────────────────
-def build_format(url, format_type, quality_str, ffmpeg_available=True):
-    if "instagram.com" in url:
-        if format_type == 'mp3':
-            return 'bestaudio/best', ['-x', '--audio-format', 'mp3']
-        return 'best', []
-
-    if format_type == 'mp3':
-        kbps  = int(re.search(r'\d+', quality_str).group()) if re.search(r'\d+', quality_str) else 128
-        aq    = {320: '0', 256: '2', 192: '4', 128: '5'}.get(kbps, '5')
-        return 'bestaudio/best', ['-x', '--audio-format', 'mp3', '--audio-quality', aq]
-
-    m   = re.search(r'(\d+)p', quality_str)
-    res = m.group(1) if m else '720'
-
-    if not ffmpeg_available:
-        # Without FFmpeg, we MUST download a pre-merged format (no + sign) to get both audio and video
-        if format_type == 'webm':
-            return f'best[height<={res}][ext=webm]/best[height<={res}]/best', []
-        # mp4
-        return f'best[height<={res}][ext=mp4]/best[height<={res}]/best', []
-
-    if format_type == 'webm':
-        fmt = (f'bestvideo[height<={res}][ext=webm]+bestaudio[ext=webm]'
-               f'/bestvideo[height<={res}]+bestaudio/best[height<={res}]/best')
-        return fmt, ['--merge-output-format', 'webm']
-
-    # mp4 (default with FFmpeg)
-    fmt = (f'bestvideo[height<={res}][ext=mp4]+bestaudio[ext=m4a]'
-           f'/bestvideo[height<={res}]+bestaudio/best[height<={res}]/best')
-    return fmt, ['--merge-output-format', 'mp4']
-
-
 # ── MIME helper ─────────────────────────────────────────
 def mime_for(fmt):
-    return {'mp3': 'audio/mpeg', 'webm': 'video/webm', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg'}.get(fmt, 'video/mp4')
-
+    return {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg'}.get(fmt, 'video/mp4')
 
 # ── Background download task executor ───────────────────
 def run_download_task(task_id, url, fmt, quality):
@@ -382,23 +188,17 @@ def run_download_task(task_id, url, fmt, quality):
             import urllib.request
             img_url = None
             shortcode = None
-            yt_id = None
-            if "instagram.com" in url:
-                shortcode_match = re.search(r'/(?:p|reel|tv)/([A-Za-z0-9_-]+)', url)
-                shortcode = shortcode_match.group(1) if shortcode_match else None
-                if shortcode:
-                    redirect_url = f"https://www.instagram.com/p/{shortcode}/media/?size=l"
-                    req = urllib.request.Request(
-                        redirect_url, 
-                        headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
-                    )
-                    with urllib.request.urlopen(req, timeout=15) as response:
-                        img_url = response.geturl()
-            else:
-                m = re.search(r'(?:v=|youtu\.be\/|shorts\/|embed\/)([A-Za-z0-9_-]{11})', url)
-                yt_id = m.group(1) if m else None
-                if yt_id:
-                    img_url = f"https://img.youtube.com/vi/{yt_id}/maxresdefault.jpg"
+            
+            shortcode_match = re.search(r'/(?:p|reel|tv)/([A-Za-z0-9_-]+)', url)
+            shortcode = shortcode_match.group(1) if shortcode_match else None
+            if shortcode:
+                redirect_url = f"https://www.instagram.com/p/{shortcode}/media/?size=l"
+                req = urllib.request.Request(
+                    redirect_url, 
+                    headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+                )
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    img_url = response.geturl()
 
             if not img_url:
                 img_url = url
@@ -409,10 +209,8 @@ def run_download_task(task_id, url, fmt, quality):
             )
             
             out_filename = "instagram_image.jpg"
-            if "instagram.com" in url and shortcode:
+            if shortcode:
                 out_filename = f"instagram_{shortcode}.jpg"
-            elif yt_id:
-                out_filename = f"youtube_thumb_{yt_id}.jpg"
             
             out_path = os.path.join(tmpdir, out_filename)
             
@@ -436,17 +234,6 @@ def run_download_task(task_id, url, fmt, quality):
         print(f"  [Task {task_id[:8]}] Image download completed: {out_filename}")
         return
 
-    ffmpeg_available = check_ffmpeg_available()
-    yt_fmt, extra = build_format(url, fmt, quality, ffmpeg_available)
-
-    if fmt == 'mp3' and not ffmpeg_available:
-        task["status"] = "failed"
-        task["error"] = "FFmpeg is required to extract MP3 audio. Please download FFmpeg and add it to your PATH, or choose a video format instead."
-        return
-
-    if not ffmpeg_available and fmt in ['mp4', 'webm']:
-        task["phase"] = "FFmpeg not found. Downloading pre-merged video (max 720p)..."
-
     # Create temporary directory
     tmpdir_obj = tempfile.TemporaryDirectory()
     task["temp_dir_obj"] = tmpdir_obj
@@ -456,11 +243,11 @@ def run_download_task(task_id, url, fmt, quality):
     out_tmpl = os.path.join(tmpdir, 'YuvinaLoad_%(title)s.%(ext)s')
     cmd = YTDLP + cookies_args + build_ytdlp_base_args(url) + [
         '--no-config',
-        '-f', yt_fmt,
+        '-f', 'best',
         '-o', out_tmpl,
         '--no-playlist',
         '--restrict-filenames',
-    ] + extra + [url]
+    ] + [url]
 
     print(f'  ⬇  [Task {task_id[:8]}] Downloading {url} [{fmt} {quality}]')
     try:
@@ -473,8 +260,6 @@ def run_download_task(task_id, url, fmt, quality):
             errors='replace'
         )
 
-        current_stream = "file"
-        bot_blocked = False
         for line in p.stdout:
             line = line.strip()
             if not line:
@@ -482,20 +267,9 @@ def run_download_task(task_id, url, fmt, quality):
 
             print(f'  [{task_id[:8]}] {line}') # Log to server console
 
-            if "Sign in" in line or "confirm you're not a bot" in line:
-                bot_blocked = True
-
             if line.startswith('[download]'):
                 if 'Destination:' in line:
-                    dest = line.split('Destination:')[1].strip()
-                    ext = dest.split('.')[-1].lower() if '.' in dest else ''
-                    if ext in ['mp4', 'webm', 'mkv', 'avi']:
-                        current_stream = "video"
-                    elif ext in ['m4a', 'mp3', 'opus', 'ogg', 'wav']:
-                        current_stream = "audio"
-                    else:
-                        current_stream = "file"
-                    task["phase"] = f"Downloading {current_stream} stream..."
+                    task["phase"] = "Downloading video stream..."
                 
                 # Check progress stats
                 m = re.search(r'(\d+\.\d+)%\s+of\s+(\S+)\s+at\s+(\S+)\s+ETA\s+(\S+)', line)
@@ -503,28 +277,13 @@ def run_download_task(task_id, url, fmt, quality):
                     task["progress"] = float(m.group(1))
                     task["speed"] = m.group(3)
                     task["eta"] = m.group(4)
-                    task["phase"] = f"Downloading {current_stream} stream ({task['progress']}%)"
-            elif line.startswith('[Merger]'):
-                task["phase"] = "Merging video and audio streams (using FFmpeg)..."
-                task["progress"] = 92.0
-            elif line.startswith('[ExtractAudio]'):
-                task["phase"] = "Extracting MP3 audio (using FFmpeg)..."
-                task["progress"] = 94.0
-            elif line.startswith('[ffmpeg]'):
-                task["phase"] = "Processing output format (using FFmpeg)..."
-                task["progress"] = 97.0
+                    task["phase"] = f"Downloading video stream ({task['progress']}%)"
 
         p.wait()
 
         if p.returncode != 0:
             task["status"] = "failed"
-            if bot_blocked:
-                task["error"] = ("YouTube blocked this request (Bot detection).<br><br>"
-                                 "<b>To fix this:</b><br>"
-                                 "• <b>For local runs</b>: Set <code>YOUTUBE_COOKIES_BROWSER=chrome</code> (or edge, firefox) in <code>start.bat</code> and restart.<br>"
-                                 "• <b>For live deployments (Render, Railway, etc.)</b>: Export YouTube cookies using a browser extension (like 'Get cookies.txt LOCALLY'), copy the file contents, and add it as the <code>YOUTUBE_COOKIES</code> environment variable in your dashboard settings.")
-            else:
-                task["error"] = f"yt-dlp failed (code {p.returncode}). Video might be private, blocked, or unavailable."
+            task["error"] = f"yt-dlp failed (code {p.returncode}). Video might be private, blocked, or unavailable."
             tmpdir_obj.cleanup()
             return
 
@@ -553,9 +312,9 @@ def run_download_task(task_id, url, fmt, quality):
                 pass
 
 
-# ══════════════════════════════════════════════════════
+# ══════════════════════════════
 #  Request Handler
-# ══════════════════════════════════════════════════════
+# ══════════════════════════════
 class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=WEBROOT, **kwargs)
@@ -602,52 +361,23 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
     # ── /api/health ────────────────────────────────────
     def api_health(self):
         is_cloud = bool(os.environ.get('PORT'))  # Render/Railway set PORT env var
-        cookie_status = 'none'
-        if COOKIES_PATH:    cookie_status = 'cookies_file'
-        elif COOKIES_BROWSER: cookie_status = f'browser:{COOKIES_BROWSER}'
         
         insta_cookie_status = 'none'
         if INSTAGRAM_COOKIES_PATH: insta_cookie_status = 'cookies_file'
         elif COOKIES_BROWSER:      insta_cookie_status = f'browser:{COOKIES_BROWSER}'
         
-        # Check JS runtime
-        js_status = 'none'
-        for cmd in ['deno', 'node']:
-            try:
-                subprocess.run([cmd, '--version'], capture_output=True, check=True)
-                js_status = cmd
-                break
-            except Exception:
-                pass
-        if js_status == 'none':
-            for d in [WEBROOT, tempfile.gettempdir()]:
-                local_deno = os.path.join(d, 'deno.exe' if sys.platform.startswith('win') else 'deno')
-                if os.path.exists(local_deno):
-                    try:
-                        subprocess.run([local_deno, '--version'], capture_output=True, check=True)
-                        js_status = 'local_deno'
-                        break
-                    except Exception:
-                        pass
-
         self.json({
             'status':            'ok',
             'ytdlp':             bool(YTDLP),
-            'cookies':           cookie_status,
             'cookies_instagram': insta_cookie_status,
-            'js_runtime':        js_status,
             'cloud_mode':        is_cloud,
-            'warning':           (
-                'No cookies configured. YouTube bot-block is likely on cloud deployments. '
-                'Set the YOUTUBE_COOKIES environment variable in your hosting dashboard.'
-            ) if is_cloud and cookie_status == 'none' else None,
         })
 
     # ── /api/info ─────────────────────────────────────
     def api_info(self, params):
         url = get_target_url(params)
         if not url:
-            self.json({'error': 'Missing ?url= or ?id='}, 400); return
+            self.json({'error': 'Missing ?url='}, 400); return
         if not YTDLP:
             self.json({'error': 'yt-dlp not found'}, 500); return
 
@@ -664,41 +394,34 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
                 print(f"[YuvinaLoad Error] yt-dlp stderr: {r.stderr}")
                 
                 # Check for Instagram photo post fallback
-                if "instagram.com" in url and ("no video in this post" in r.stderr.lower() or "extractor" in r.stderr.lower() or "unsupported" in r.stderr.lower()):
-                    try:
-                        import urllib.request
-                        # Extract shortcode from url
-                        shortcode_match = re.search(r'/(?:p|reel|tv)/([A-Za-z0-9_-]+)', url)
-                        shortcode = shortcode_match.group(1) if shortcode_match else "media"
-                        
-                        redirect_url = f"https://www.instagram.com/p/{shortcode}/media/?size=l"
-                        req = urllib.request.Request(
-                            redirect_url, 
-                            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
-                        )
-                        with urllib.request.urlopen(req, timeout=15) as response:
-                            direct_img_url = response.geturl()
-                        
-                        self.json({
-                            'title':      f"Instagram Photo Post ({shortcode})",
-                            'channel':    "Instagram Post",
-                            'duration':   0,
-                            'thumbnail':  direct_img_url,
-                            'view_count': 0,
-                            'type':       'image',
-                        })
-                        return
-                    except Exception as fallback_err:
-                        print(f"[YuvinaLoad Warning] Instagram photo fallback failed: {fallback_err}")
+                try:
+                    import urllib.request
+                    shortcode_match = re.search(r'/(?:p|reel|tv)/([A-Za-z0-9_-]+)', url)
+                    shortcode = shortcode_match.group(1) if shortcode_match else "media"
+                    
+                    redirect_url = f"https://www.instagram.com/p/{shortcode}/media/?size=l"
+                    req = urllib.request.Request(
+                        redirect_url, 
+                        headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+                    )
+                    with urllib.request.urlopen(req, timeout=15) as response:
+                        direct_img_url = response.geturl()
+                    
+                    self.json({
+                        'title':      f"Instagram Photo Post ({shortcode})",
+                        'channel':    "Instagram Post",
+                        'duration':   0,
+                        'thumbnail':  direct_img_url,
+                        'view_count': 0,
+                        'type':       'image',
+                    })
+                    return
+                except Exception as fallback_err:
+                    print(f"[YuvinaLoad Warning] Instagram photo fallback failed: {fallback_err}")
 
                 err_msg = "Media unavailable, private, or blocked by platform"
                 if "429" in r.stderr or "Too Many Requests" in r.stderr:
                     err_msg = "Rate-limited by platform (HTTP 429)"
-                elif "Sign in" in r.stderr or "confirm you're not a bot" in r.stderr:
-                    err_msg = ("YouTube bot detection block triggered.<br><br>"
-                               "<b>To fix this:</b><br>"
-                               "• <b>For local runs</b>: Open <code>start.bat</code> in a text editor, uncomment the line matching your browser (e.g. <code>set YOUTUBE_COOKIES_BROWSER=chrome</code>), save, and restart the app.<br>"
-                               "• <b>For live deployments (Render, Railway, etc.)</b>: Export YouTube cookies using a browser extension (like 'Get cookies.txt LOCALLY'), copy the file contents, and add it as the <code>YOUTUBE_COOKIES</code> environment variable in your dashboard settings.")
                 
                 details = r.stderr.strip().split('\n')[-1] if r.stderr else "Unknown error"
                 self.json({'error': f"{err_msg}. Details: {details}"}, 404); return
@@ -726,10 +449,10 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
     def api_download(self, params):
         url = get_target_url(params)
         fmt      = params.get('format',  'mp4')
-        quality  = params.get('quality', '720p')
+        quality  = params.get('quality', 'Best Quality (Original)')
 
         if not url:
-            self.json({'error': 'Missing ?url= or ?id='}, 400); return
+            self.json({'error': 'Missing ?url='}, 400); return
         if not YTDLP:
             self.json({'error': 'yt-dlp not installed. Please restart via start.bat'}, 500); return
 
@@ -826,51 +549,11 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
             DOWNLOAD_TASKS.pop(task_id, None)
 
 
-# ══════════════════════════════════════════════════════
+# ══════════════════════════════
 #  Entry Point
-# ══════════════════════════════════════════════════════
+# ══════════════════════════════
 def main():
-    global YTDLP, COOKIES_PATH, COOKIES_BROWSER, INSTAGRAM_COOKIES_PATH
-
-    # Load cookies from environment variables or local file
-    env_cookies = os.environ.get('YOUTUBE_COOKIES')
-    if env_cookies:
-        try:
-            # Normalize escape sequences if pasted as a single line in environment dashboard
-            if '\\n' in env_cookies:
-                env_cookies = env_cookies.replace('\\n', '\n')
-            if '\\t' in env_cookies:
-                env_cookies = env_cookies.replace('\\t', '\t')
-
-            # Convert JSON or header format into a valid Netscape cookies format
-            normalized_cookies = normalize_cookies(env_cookies)
-
-            # Write environment cookies to a temporary file
-            temp_cookies = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8')
-            temp_cookies.write(normalized_cookies)
-            temp_cookies.close()
-            COOKIES_PATH = temp_cookies.name
-            print(f"  [Cookies] Loaded YouTube cookies from YOUTUBE_COOKIES environment variable!")
-            
-            # Clean up temp file on shutdown
-            import atexit
-            def cleanup_cookies():
-                if os.path.exists(temp_cookies.name):
-                    try: os.remove(temp_cookies.name)
-                    except: pass
-            atexit.register(cleanup_cookies)
-        except Exception as e:
-            print(f"  [Cookies] ❌ Failed to write YOUTUBE_COOKIES: {e}")
-    else:
-        local_cookies = os.path.join(WEBROOT, 'cookies.txt')
-        if os.path.exists(local_cookies):
-            COOKIES_PATH = local_cookies
-            print("  [Cookies] Loaded YouTube cookies from local cookies.txt file!")
-        else:
-            env_cookies_browser = os.environ.get('YOUTUBE_COOKIES_BROWSER')
-            if env_cookies_browser:
-                COOKIES_BROWSER = env_cookies_browser.strip().lower()
-                print(f"  [Cookies] Configured to use cookies from browser: {COOKIES_BROWSER}")
+    global YTDLP, COOKIES_BROWSER, INSTAGRAM_COOKIES_PATH
 
     # Load Instagram cookies from environment variables or local file
     env_insta_cookies = os.environ.get('INSTAGRAM_COOKIES')
@@ -901,6 +584,11 @@ def main():
         if os.path.exists(local_insta_cookies):
             INSTAGRAM_COOKIES_PATH = local_insta_cookies
             print("  [Cookies] Loaded Instagram cookies from local instagram_cookies.txt file!")
+        else:
+            env_cookies_browser = os.environ.get('INSTAGRAM_COOKIES_BROWSER')
+            if env_cookies_browser:
+                COOKIES_BROWSER = env_cookies_browser.strip().lower()
+                print(f"  [Cookies] Configured to use cookies from browser: {COOKIES_BROWSER}")
 
     # Reconfigure stdout/stderr to UTF-8 on Windows to prevent UnicodeEncodeError
     if sys.platform.startswith('win'):
@@ -917,19 +605,10 @@ def main():
             os.environ['PATH'] = d + os.pathsep + os.environ['PATH']
 
     print('\n ╔════════════════════════════════════════╗')
-    print(' ║   YuvinaLoad  –  Local Download Server  ║')
+    print(' ║   YuvinaLoad – Instagram Downloader    ║')
     print(' ╚════════════════════════════════════════╝\n')
 
-    # Automatically check and download FFmpeg if running on Windows and missing
-    if sys.platform.startswith('win') and not check_ffmpeg_available():
-        download_ffmpeg()
-
-    # Automatically check and download Deno if missing a JS runtime (needed by yt-dlp)
-    if not check_js_runtime_available():
-        download_deno()
-
     # Proactively upgrade yt-dlp to latest version if running on Render/Railway/etc.
-    # to avoid using outdated cached versions of yt-dlp from the deployment server cache
     if os.environ.get('PORT') or os.environ.get('RENDER') or os.environ.get('RAILWAY_STATIC_URL'):
         print(' ☁️  Cloud environment detected. Proactively upgrading yt-dlp to latest version...')
         try:

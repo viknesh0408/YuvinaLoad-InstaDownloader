@@ -3,20 +3,20 @@ title YuvinaLoad – Download Server
 color 0A
 
 :: ═════════════════════════════════════════════════════════════════════════════
-::  YOUTUBE BOT BLOCK BYPASS SETTING (Optional)
-::  If YouTube blocks downloads and asks you to sign in, uncomment one of the
-::  lines below depending on which browser you use to watch YouTube.
+::  INSTAGRAM COOKIES BYPASS SETTING (Optional)
+::  If Instagram blocks downloads, uncomment one of the lines below
+::  to use cookies from your browser session where you are logged in.
 :: ═════════════════════════════════════════════════════════════════════════════
-:: set YOUTUBE_COOKIES_BROWSER=chrome
-:: set YOUTUBE_COOKIES_BROWSER=edge
-:: set YOUTUBE_COOKIES_BROWSER=firefox
-:: set YOUTUBE_COOKIES_BROWSER=brave
-:: set YOUTUBE_COOKIES_BROWSER=opera
-:: set YOUTUBE_COOKIES_BROWSER=vivaldi
+:: set INSTAGRAM_COOKIES_BROWSER=chrome
+:: set INSTAGRAM_COOKIES_BROWSER=edge
+:: set INSTAGRAM_COOKIES_BROWSER=firefox
+:: set INSTAGRAM_COOKIES_BROWSER=brave
+:: set INSTAGRAM_COOKIES_BROWSER=opera
+:: set INSTAGRAM_COOKIES_BROWSER=vivaldi
 
 echo.
 echo  ╔════════════════════════════════════════╗
-echo  ║   YuvinaLoad  -  YouTube Downloader    ║
+echo  ║  YuvinaLoad  -  Instagram Downloader   ║
 echo  ╚════════════════════════════════════════╝
 echo.
 
