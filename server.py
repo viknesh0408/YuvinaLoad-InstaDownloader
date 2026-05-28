@@ -323,7 +323,7 @@ def build_format(url, format_type, quality_str, ffmpeg_available=True):
 
 # ── MIME helper ─────────────────────────────────────────
 def mime_for(fmt):
-    return {'mp3': 'audio/mpeg', 'webm': 'video/webm'}.get(fmt, 'video/mp4')
+    return {'mp3': 'audio/mpeg', 'webm': 'video/webm', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg'}.get(fmt, 'video/mp4')
 
 
 # ── Background download task executor ───────────────────
@@ -331,6 +331,73 @@ def run_download_task(task_id, url, fmt, quality):
     task = DOWNLOAD_TASKS[task_id]
     task["status"] = "downloading"
     task["phase"] = "Initializing download..."
+
+    if fmt == 'jpg':
+        task["phase"] = "Downloading image..."
+        task["progress"] = 10.0
+        
+        # Create temporary directory
+        tmpdir_obj = tempfile.TemporaryDirectory()
+        task["temp_dir_obj"] = tmpdir_obj
+        tmpdir = tmpdir_obj.name
+        
+        try:
+            import urllib.request
+            img_url = None
+            shortcode = None
+            yt_id = None
+            if "instagram.com" in url:
+                shortcode_match = re.search(r'/(?:p|reel|tv)/([A-Za-z0-9_-]+)', url)
+                shortcode = shortcode_match.group(1) if shortcode_match else None
+                if shortcode:
+                    redirect_url = f"https://www.instagram.com/p/{shortcode}/media/?size=l"
+                    req = urllib.request.Request(
+                        redirect_url, 
+                        headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+                    )
+                    with urllib.request.urlopen(req, timeout=15) as response:
+                        img_url = response.geturl()
+            else:
+                m = re.search(r'(?:v=|youtu\.be\/|shorts\/|embed\/)([A-Za-z0-9_-]{11})', url)
+                yt_id = m.group(1) if m else None
+                if yt_id:
+                    img_url = f"https://img.youtube.com/vi/{yt_id}/maxresdefault.jpg"
+
+            if not img_url:
+                img_url = url
+
+            req = urllib.request.Request(
+                img_url, 
+                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+            )
+            
+            out_filename = "instagram_image.jpg"
+            if "instagram.com" in url and shortcode:
+                out_filename = f"instagram_{shortcode}.jpg"
+            elif yt_id:
+                out_filename = f"youtube_thumb_{yt_id}.jpg"
+            
+            out_path = os.path.join(tmpdir, out_filename)
+            
+            task["progress"] = 50.0
+            with urllib.request.urlopen(req, timeout=15) as response:
+                with open(out_path, 'wb') as out_file:
+                    out_file.write(response.read())
+            
+            task["status"] = "completed"
+            task["progress"] = 100.0
+            task["filename"] = out_filename
+            task["filepath"] = out_path
+            task["phase"] = "Download finished on server!"
+            
+        except Exception as e:
+            task["status"] = "failed"
+            task["error"] = f"Failed to download image: {str(e)}"
+            tmpdir_obj.cleanup()
+            return
+
+        print(f"  [Task {task_id[:8]}] Image download completed: {out_filename}")
+        return
 
     ffmpeg_available = check_ffmpeg_available()
     yt_fmt, extra = build_format(url, fmt, quality, ffmpeg_available)
@@ -558,6 +625,35 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
             )
             if r.returncode != 0:
                 print(f"[YuvinaLoad Error] yt-dlp stderr: {r.stderr}")
+                
+                # Check for Instagram photo post fallback
+                if "instagram.com" in url and ("no video in this post" in r.stderr.lower() or "extractor" in r.stderr.lower() or "unsupported" in r.stderr.lower()):
+                    try:
+                        import urllib.request
+                        # Extract shortcode from url
+                        shortcode_match = re.search(r'/(?:p|reel|tv)/([A-Za-z0-9_-]+)', url)
+                        shortcode = shortcode_match.group(1) if shortcode_match else "media"
+                        
+                        redirect_url = f"https://www.instagram.com/p/{shortcode}/media/?size=l"
+                        req = urllib.request.Request(
+                            redirect_url, 
+                            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+                        )
+                        with urllib.request.urlopen(req, timeout=15) as response:
+                            direct_img_url = response.geturl()
+                        
+                        self.json({
+                            'title':      f"Instagram Photo Post ({shortcode})",
+                            'channel':    "Instagram Post",
+                            'duration':   0,
+                            'thumbnail':  direct_img_url,
+                            'view_count': 0,
+                            'type':       'image',
+                        })
+                        return
+                    except Exception as fallback_err:
+                        print(f"[YuvinaLoad Warning] Instagram photo fallback failed: {fallback_err}")
+
                 err_msg = "Media unavailable, private, or blocked by platform"
                 if "429" in r.stderr or "Too Many Requests" in r.stderr:
                     err_msg = "Rate-limited by platform (HTTP 429)"
