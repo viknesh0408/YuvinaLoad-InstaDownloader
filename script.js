@@ -186,6 +186,43 @@ function showStatus(msg, type = 'error') {
 function hideStatus() { statusMsg.classList.add('d-none'); }
 
 // ══════════════════════════════
+//  Safe JSON Fetching Helper
+// ══════════════════════════════
+async function safeFetchJson(url, options = {}) {
+  try {
+    const resp = await fetch(url, options);
+    
+    // Check Content-Type header to make sure it's JSON
+    const contentType = resp.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      const text = await resp.text();
+      // If it looks like HTML, it's likely a 404 page from Live Server or server crash
+      if (text.trim().startsWith('<')) {
+        throw new Error('The server returned an HTML page instead of JSON.<br><br>' +
+                        'This usually means the Python downloader server is not running on this port, ' +
+                        'or you are opening the app via a static server (like VS Code Live Server).<br><br>' +
+                        'Please make sure you started the backend by double-clicking "start.bat" ' +
+                        'and are using the browser window that opened automatically.');
+      }
+      throw new Error(`Server returned non-JSON content: ${contentType || 'unknown type'}`);
+    }
+    
+    const data = await resp.json();
+    if (!resp.ok) {
+      throw new Error(data.error || `Server responded with status ${resp.status}`);
+    }
+    return data;
+  } catch (err) {
+    // If it's already a descriptive error, rethrow it
+    if (err.message && (err.message.includes('downloader server is not running') || err.message.includes('non-JSON content'))) {
+      throw err;
+    }
+    // Network or other error
+    throw new Error(`Failed to communicate with downloader server: ${err.message || err}`);
+  }
+}
+
+// ══════════════════════════════
 //  Render quality buttons
 // ══════════════════════════════
 function renderQualities(format) {
@@ -213,9 +250,7 @@ function renderQualities(format) {
 // ══════════════════════════════
 async function fetchVideoInfo(videoId) {
   if (IS_SERVER) {
-    const resp = await fetch(`/api/info?id=${videoId}`);
-    const data = await resp.json();
-    if (data.error) throw new Error(data.error);
+    const data = await safeFetchJson(`/api/info?id=${videoId}`);
     return {
       title:     data.title,
       channel:   data.channel,
@@ -225,11 +260,9 @@ async function fetchVideoInfo(videoId) {
     };
   }
   // Fallback: oEmbed (works without server, metadata only)
-  const resp = await fetch(
+  const d = await safeFetchJson(
     `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`
   );
-  if (!resp.ok) throw new Error('Video not found or unavailable.');
-  const d = await resp.json();
   return {
     title:    d.title       || 'Unknown Title',
     channel:  d.author_name || 'Unknown Channel',
@@ -379,22 +412,13 @@ downloadBtn.addEventListener('click', async () => {
                      `&format=${selectedFormat}` +
                      `&quality=${encodeURIComponent(selectedQuality)}`;
                      
-    const startResp = await fetch(startUrl);
-    if (!startResp.ok) {
-      const errData = await startResp.json().catch(() => ({}));
-      throw new Error(errData.error || 'Failed to start download task.');
-    }
-    
-    const { task_id } = await startResp.json();
+    const { task_id } = await safeFetchJson(startUrl);
     if (!task_id) throw new Error('No task ID returned by the server.');
 
     // 2. Poll progress status endpoint
     pollInterval = setInterval(async () => {
       try {
-        const statusResp = await fetch(`/api/download/status?task_id=${task_id}`);
-        if (!statusResp.ok) throw new Error('Failed to fetch download status.');
-        
-        const data = await statusResp.json();
+        const data = await safeFetchJson(`/api/download/status?task_id=${task_id}`);
         
         if (data.status === 'downloading') {
           // Update progress bar & label
@@ -435,7 +459,7 @@ downloadBtn.addEventListener('click', async () => {
         }
       } catch (pollErr) {
         console.error('Error polling status:', pollErr);
-        cleanupAndClose('failed', 'Lost connection to the downloader server.');
+        cleanupAndClose('failed', pollErr.message || 'Lost connection to the downloader server.');
       }
     }, 1000);
 

@@ -24,8 +24,16 @@ WEBROOT = os.path.dirname(os.path.abspath(__file__))
 YTDLP   = None   # resolved at startup
 
 # Global dictionary to hold active and completed download tasks
-DOWNLOAD_TASKS = {}
-COOKIES_PATH   = None
+DOWNLOAD_TASKS  = {}
+COOKIES_PATH    = None
+COOKIES_BROWSER = None
+
+def get_cookies_args():
+    if COOKIES_PATH:
+        return ['--cookies', COOKIES_PATH]
+    elif COOKIES_BROWSER:
+        return ['--cookies-from-browser', COOKIES_BROWSER]
+    return []
 
 
 
@@ -145,7 +153,7 @@ def run_download_task(task_id, vid, fmt, quality):
     task["temp_dir_obj"] = tmpdir_obj
     tmpdir = tmpdir_obj.name
 
-    cookies_args = ['--cookies', COOKIES_PATH] if COOKIES_PATH else []
+    cookies_args = get_cookies_args()
     out_tmpl = os.path.join(tmpdir, 'YuvinaLoad_%(title)s.%(ext)s')
     cmd = YTDLP + cookies_args + [
         '--no-config',
@@ -167,12 +175,16 @@ def run_download_task(task_id, vid, fmt, quality):
         )
 
         current_stream = "file"
+        bot_blocked = False
         for line in p.stdout:
             line = line.strip()
             if not line:
                 continue
 
             print(f'  [{task_id[:8]}] {line}') # Log to server console
+
+            if "Sign in" in line or "confirm you're not a bot" in line:
+                bot_blocked = True
 
             if line.startswith('[download]'):
                 if 'Destination:' in line:
@@ -207,7 +219,13 @@ def run_download_task(task_id, vid, fmt, quality):
 
         if p.returncode != 0:
             task["status"] = "failed"
-            task["error"] = f"yt-dlp failed (code {p.returncode}). Video might be private, blocked, or unavailable."
+            if bot_blocked:
+                task["error"] = ("YouTube blocked this request (Bot detection).<br><br>"
+                                 "<b>To fix this:</b><br>"
+                                 "• <b>For local runs</b>: Set <code>YOUTUBE_COOKIES_BROWSER=chrome</code> (or edge, firefox) in <code>start.bat</code> and restart.<br>"
+                                 "• <b>For live deployments (Render, Railway, etc.)</b>: Export YouTube cookies using a browser extension (like 'Get cookies.txt LOCALLY'), copy the file contents, and add it as the <code>YOUTUBE_COOKIES</code> environment variable in your dashboard settings.")
+            else:
+                task["error"] = f"yt-dlp failed (code {p.returncode}). Video might be private, blocked, or unavailable."
             tmpdir_obj.cleanup()
             return
 
@@ -290,7 +308,7 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
             self.json({'error': 'yt-dlp not found'}, 500); return
 
         try:
-            cookies_args = ['--cookies', COOKIES_PATH] if COOKIES_PATH else []
+            cookies_args = get_cookies_args()
             r = subprocess.run(
                 YTDLP + cookies_args + ['--no-config', '-f', 'best', '--dump-json', '--no-playlist', '--skip-download',
                           f'https://www.youtube.com/watch?v={vid}'],
@@ -301,8 +319,11 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
                 err_msg = "Video unavailable, private, or blocked by YouTube"
                 if "429" in r.stderr or "Too Many Requests" in r.stderr:
                     err_msg = "YouTube rate-limited this server IP (HTTP 429)"
-                elif "Sign in" in r.stderr:
-                    err_msg = "YouTube blocked this hosting provider (Bot detection)"
+                elif "Sign in" in r.stderr or "confirm you're not a bot" in r.stderr:
+                    err_msg = ("YouTube blocked this request (Bot detection).<br><br>"
+                               "<b>To fix this:</b><br>"
+                               "• <b>For local runs</b>: Set <code>YOUTUBE_COOKIES_BROWSER=chrome</code> (or edge, firefox) in <code>start.bat</code> and restart.<br>"
+                               "• <b>For live deployments (Render, Railway, etc.)</b>: Export YouTube cookies using a browser extension (like 'Get cookies.txt LOCALLY'), copy the file contents, and add it as the <code>YOUTUBE_COOKIES</code> environment variable in your dashboard settings.")
                 
                 details = r.stderr.strip().split('\n')[-1] if r.stderr else "Unknown error"
                 self.json({'error': f"{err_msg}. Details: {details}"}, 404); return
@@ -428,14 +449,20 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
 #  Entry Point
 # ══════════════════════════════════════════════════════
 def main():
-    global YTDLP, COOKIES_PATH
+    global YTDLP, COOKIES_PATH, COOKIES_BROWSER
 
     # Load cookies from environment variables or local file
     env_cookies = os.environ.get('YOUTUBE_COOKIES')
     if env_cookies:
         try:
+            # Normalize escape sequences if pasted as a single line in environment dashboard
+            if '\\n' in env_cookies:
+                env_cookies = env_cookies.replace('\\n', '\n')
+            if '\\t' in env_cookies:
+                env_cookies = env_cookies.replace('\\t', '\t')
+
             # Write environment cookies to a temporary file
-            temp_cookies = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt')
+            temp_cookies = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8')
             temp_cookies.write(env_cookies)
             temp_cookies.close()
             COOKIES_PATH = temp_cookies.name
@@ -455,6 +482,11 @@ def main():
         if os.path.exists(local_cookies):
             COOKIES_PATH = local_cookies
             print("  [Cookies] Loaded cookies from local cookies.txt file!")
+        else:
+            env_cookies_browser = os.environ.get('YOUTUBE_COOKIES_BROWSER')
+            if env_cookies_browser:
+                COOKIES_BROWSER = env_cookies_browser.strip().lower()
+                print(f"  [Cookies] Configured to use cookies from browser: {COOKIES_BROWSER}")
 
     # Reconfigure stdout/stderr to UTF-8 on Windows to prevent UnicodeEncodeError
     if sys.platform.startswith('win'):
