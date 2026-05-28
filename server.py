@@ -42,13 +42,21 @@ def build_ytdlp_base_args():
     work on cloud hosting IPs (Render, Railway, Fly.io, etc.).
     'ios' / 'web' require GVS PO Tokens since yt-dlp v2024.11+ and fail
     on live servers without them.
+
+    However, some clients (like android_vr) do not support cookies, and forcing
+    them bypasses/ignores the cookies we loaded. If cookies are present, we let
+    yt-dlp use its default clients (web, mweb, android, ios) so cookies can
+    authenticate the requests.
     """
-    return [
-        '--extractor-args', 'youtube:player_client=android,android_vr',
+    args = [
         '--no-check-certificates',
         '--add-header', 'Accept-Language:en-US,en;q=0.9',
         '--socket-timeout', '30',
     ]
+    if not (COOKIES_PATH or COOKIES_BROWSER):
+        args += ['--extractor-args', 'youtube:player_client=android,android_vr']
+    return args
+
 
 
 
