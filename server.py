@@ -35,6 +35,20 @@ def get_cookies_args():
         return ['--cookies-from-browser', COOKIES_BROWSER]
     return []
 
+def build_ytdlp_base_args():
+    """Return common yt-dlp anti-bot and compatibility flags.
+
+    'android' and 'android_vr' player clients do NOT require PO Tokens and
+    are not blocked by YouTube's bot-detection on cloud hosting IPs (Render,
+    Railway, Fly.io, etc.).  Using 'ios' or 'web' requires GVS PO Tokens
+    since yt-dlp v2024.11+ and will fail on live servers without them.
+    """
+    return [
+        '--extractor-args', 'youtube:player_client=android,android_vr',
+        '--no-check-certificates',
+        '--add-header', 'Accept-Language:en-US,en;q=0.9',
+    ]
+
 
 
 # ── Locate yt-dlp ──────────────────────────────────────
@@ -155,7 +169,7 @@ def run_download_task(task_id, vid, fmt, quality):
 
     cookies_args = get_cookies_args()
     out_tmpl = os.path.join(tmpdir, 'YuvinaLoad_%(title)s.%(ext)s')
-    cmd = YTDLP + cookies_args + [
+    cmd = YTDLP + cookies_args + build_ytdlp_base_args() + [
         '--no-config',
         '-f', yt_fmt,
         '-o', out_tmpl,
@@ -310,9 +324,11 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
         try:
             cookies_args = get_cookies_args()
             r = subprocess.run(
-                YTDLP + cookies_args + ['--no-config', '--dump-json', '--no-playlist', '--skip-download',
-                          f'https://www.youtube.com/watch?v={vid}'],
-                capture_output=True, text=True, timeout=40
+                YTDLP + cookies_args + build_ytdlp_base_args() + [
+                    '--no-config', '--dump-json', '--no-playlist', '--skip-download',
+                    f'https://www.youtube.com/watch?v={vid}',
+                ],
+                capture_output=True, text=True, timeout=45
             )
             if r.returncode != 0:
                 print(f"[YuvinaLoad Error] yt-dlp stderr: {r.stderr}")
