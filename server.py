@@ -42,9 +42,46 @@ def normalize_cookies(raw_content):
     if not raw_content:
         return ""
 
-    # Case 1: Already Netscape cookie format
-    if raw_content.startswith("# Netscape") or raw_content.startswith("# HTTP Cookie"):
-        return raw_content
+    # Case 1: Netscape cookie format (even if mangled by space-separation or collapsed into a single line)
+    if raw_content.startswith("# Netscape") or raw_content.startswith("# HTTP Cookie") or ".youtube.com" in raw_content or "youtube.com" in raw_content:
+        lines = []
+        raw_lines = []
+        if "\n" in raw_content:
+            raw_lines = raw_content.split("\n")
+        else:
+            # Single collapsed line (spaces instead of newlines)
+            tokens = raw_content.split()
+            if tokens and tokens[0] == "#":
+                while tokens and (tokens[0].startswith("#") or tokens[0] in ["Netscape", "HTTP", "Cookie", "File"]):
+                    tokens.pop(0)
+            for i in range(0, len(tokens) - 6, 7):
+                t = tokens[i:i+7]
+                if t[1].upper() in ["TRUE", "FALSE"] and t[3].upper() in ["TRUE", "FALSE"]:
+                    lines.append("\t".join(t))
+            if lines:
+                return "# Netscape HTTP Cookie File\n" + "\n".join(lines) + "\n"
+
+        if raw_lines:
+            parsed_lines = ["# Netscape HTTP Cookie File"]
+            for line in raw_lines:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = re.split(r'\t+|\s{2,}', line)
+                if len(parts) < 7:
+                    parts = line.split()
+                if len(parts) >= 7:
+                    domain = parts[0]
+                    sub = parts[1]
+                    path = parts[2]
+                    secure = parts[3]
+                    exp = parts[4]
+                    name = parts[5]
+                    value = " ".join(parts[6:])
+                    if sub.upper() in ["TRUE", "FALSE"] and secure.upper() in ["TRUE", "FALSE"]:
+                        parsed_lines.append(f"{domain}\t{sub.upper()}\t{path}\t{secure.upper()}\t{exp}\t{name}\t{value}")
+            if len(parsed_lines) > 1:
+                return "\n".join(parsed_lines) + "\n"
 
     # Case 2: JSON format
     try:
