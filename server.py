@@ -117,7 +117,7 @@ def build_format(format_type, quality_str, ffmpeg_available=True):
 
     if format_type == 'webm':
         fmt = (f'bestvideo[height<={res}][ext=webm]+bestaudio[ext=webm]'
-               f'/bestvideo[height<={res}]+bestaudio/best[height<={res}]')
+               f'/bestvideo[height<={res}]+bestaudio/best[height<={res}]/best')
         return fmt, ['--merge-output-format', 'webm']
 
     # mp4 (default with FFmpeg)
@@ -310,7 +310,7 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
         try:
             cookies_args = get_cookies_args()
             r = subprocess.run(
-                YTDLP + cookies_args + ['--no-config', '-f', 'best', '--dump-json', '--no-playlist', '--skip-download',
+                YTDLP + cookies_args + ['--no-config', '--dump-json', '--no-playlist', '--skip-download',
                           f'https://www.youtube.com/watch?v={vid}'],
                 capture_output=True, text=True, timeout=40
             )
