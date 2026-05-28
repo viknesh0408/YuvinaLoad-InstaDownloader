@@ -658,10 +658,10 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
                 if "429" in r.stderr or "Too Many Requests" in r.stderr:
                     err_msg = "Rate-limited by platform (HTTP 429)"
                 elif "Sign in" in r.stderr or "confirm you're not a bot" in r.stderr:
-                    err_msg = ("Bot detection block triggered.<br><br>"
+                    err_msg = ("YouTube bot detection block triggered.<br><br>"
                                "<b>To fix this:</b><br>"
-                               "• <b>For YouTube</b>: Export cookies using an extension and set <code>YOUTUBE_COOKIES</code> env variable.<br>"
-                               "• <b>For Instagram</b>: Export cookies and set <code>INSTAGRAM_COOKIES</code> env variable in your dashboard settings.")
+                               "• <b>For local runs</b>: Open <code>start.bat</code> in a text editor, uncomment the line matching your browser (e.g. <code>set YOUTUBE_COOKIES_BROWSER=chrome</code>), save, and restart the app.<br>"
+                               "• <b>For live deployments (Render, Railway, etc.)</b>: Export YouTube cookies using a browser extension (like 'Get cookies.txt LOCALLY'), copy the file contents, and add it as the <code>YOUTUBE_COOKIES</code> environment variable in your dashboard settings.")
                 
                 details = r.stderr.strip().split('\n')[-1] if r.stderr else "Unknown error"
                 self.json({'error': f"{err_msg}. Details: {details}"}, 404); return
