@@ -28,6 +28,72 @@ DOWNLOAD_TASKS  = {}
 COOKIES_PATH    = None
 COOKIES_BROWSER = None
 
+def normalize_cookies(raw_content):
+    raw_content = raw_content.strip()
+    if not raw_content:
+        return ""
+
+    # Case 1: Already Netscape cookie format
+    if raw_content.startswith("# Netscape") or raw_content.startswith("# HTTP Cookie"):
+        return raw_content
+
+    # Case 2: JSON format
+    try:
+        data = json.loads(raw_content)
+        lines = ["# Netscape HTTP Cookie File"]
+        default_exp = str(int(time.time()) + 31536000) # 1 year expiry
+        
+        if isinstance(data, list):
+            for item in data:
+                if not isinstance(item, dict):
+                    continue
+                name = item.get("name")
+                value = item.get("value")
+                if not name or value is None:
+                    continue
+                domain = item.get("domain", ".youtube.com")
+                path = item.get("path", "/")
+                secure = "TRUE" if item.get("secure", True) else "FALSE"
+                exp = item.get("expirationDate") or item.get("expiry") or default_exp
+                exp = str(int(exp))
+                sub = "TRUE" if domain.startswith(".") else "FALSE"
+                lines.append(f"{domain}\t{sub}\t{path}\t{secure}\t{exp}\t{name}\t{value}")
+            return "\n".join(lines) + "\n"
+        
+        elif isinstance(data, dict):
+            for name, value in data.items():
+                if name and value is not None:
+                    lines.append(f".youtube.com\tTRUE\t/\tTRUE\t{default_exp}\t{name}\t{value}")
+            return "\n".join(lines) + "\n"
+    except Exception:
+        pass
+
+    # Case 3: Raw cookie header string (e.g. "SID=abc; HSID=def;") or standard HTTP Header
+    header_content = raw_content
+    if header_content.lower().startswith("cookie:"):
+        header_content = header_content[7:].strip()
+    
+    if "=" in header_content:
+        pairs = header_content.split(";")
+        lines = ["# Netscape HTTP Cookie File"]
+        default_exp = str(int(time.time()) + 31536000)
+        has_valid_pair = False
+        for pair in pairs:
+            pair = pair.strip()
+            if not pair or "=" not in pair:
+                continue
+            parts = pair.split("=", 1)
+            name = parts[0].strip()
+            value = parts[1].strip()
+            if name and value:
+                lines.append(f".youtube.com\tTRUE\t/\tTRUE\t{default_exp}\t{name}\t{value}")
+                has_valid_pair = True
+        if has_valid_pair:
+            return "\n".join(lines) + "\n"
+
+    # Fallback: Just return it as-is
+    return raw_content
+
 def get_cookies_args():
     if COOKIES_PATH:
         return ['--cookies', COOKIES_PATH]
@@ -504,9 +570,12 @@ def main():
             if '\\t' in env_cookies:
                 env_cookies = env_cookies.replace('\\t', '\t')
 
+            # Convert JSON or header format into a valid Netscape cookies format
+            normalized_cookies = normalize_cookies(env_cookies)
+
             # Write environment cookies to a temporary file
             temp_cookies = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8')
-            temp_cookies.write(env_cookies)
+            temp_cookies.write(normalized_cookies)
             temp_cookies.close()
             COOKIES_PATH = temp_cookies.name
             print(f"  [Cookies] Loaded cookies from YOUTUBE_COOKIES environment variable!")
@@ -550,6 +619,20 @@ def main():
     # Automatically check and download FFmpeg if running on Windows and missing
     if sys.platform.startswith('win') and not check_ffmpeg_available():
         download_ffmpeg()
+
+    # Proactively upgrade yt-dlp to latest version if running on Render/Railway/etc.
+    # to avoid using outdated cached versions of yt-dlp from the deployment server cache
+    if os.environ.get('PORT') or os.environ.get('RENDER') or os.environ.get('RAILWAY_STATIC_URL'):
+        print(' ☁️  Cloud environment detected. Proactively upgrading yt-dlp to latest version...')
+        try:
+            # Run pip upgrade
+            subprocess.run(
+                [sys.executable, '-m', 'pip', 'install', '-U', 'yt-dlp'],
+                capture_output=True, text=True, timeout=60
+            )
+            print(' ✅ yt-dlp upgraded successfully!')
+        except Exception as e:
+            print(f' ⚠  Failed to upgrade yt-dlp: {e}')
 
     YTDLP = find_ytdlp()
 
