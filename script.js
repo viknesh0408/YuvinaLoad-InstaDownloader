@@ -92,6 +92,7 @@ const qualityOptions = {
   mp4:  ['2160p (4K)', '1080p (FHD)', '720p (HD)', '480p', '360p', '144p'],
   mp3:  ['320 kbps', '256 kbps', '192 kbps', '128 kbps'],
   webm: ['1080p', '720p', '480p', '360p'],
+  jpg:  ['Best Quality (Original)'],
 };
 
 // Navbar Scroll and Active state handled by unified scroll listener at the bottom.
@@ -248,26 +249,39 @@ function renderQualities(format) {
 //  • Localhost → /api/info (yt-dlp, full metadata)
 //  • file://   → YouTube oEmbed (basic, no download)
 // ══════════════════════════════
-async function fetchVideoInfo(videoId) {
+async function fetchVideoInfo(urlOrId) {
   if (IS_SERVER) {
-    const data = await safeFetchJson(`/api/info?id=${videoId}`);
+    const data = await safeFetchJson(`/api/info?url=${encodeURIComponent(urlOrId)}`);
     return {
       title:     data.title,
       channel:   data.channel,
       duration:  data.duration,
       views:     data.view_count,
-      thumbnail: data.thumbnail || `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
+      thumbnail: data.thumbnail,
+      type:      data.type || 'video',
     };
   }
   // Fallback: oEmbed (works without server, metadata only)
+  if (urlOrId.includes('instagram.com')) {
+    return {
+      title:     'Instagram Media',
+      channel:   'Instagram Creator',
+      duration:  null,
+      views:     null,
+      thumbnail: 'https://cdn-icons-png.flaticon.com/512/174/174855.png',
+      type:      'video',
+    };
+  }
+  const ytId = extractVideoId(urlOrId) || urlOrId;
   const d = await safeFetchJson(
-    `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`
+    `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${ytId}&format=json`
   );
   return {
     title:    d.title       || 'Unknown Title',
     channel:  d.author_name || 'Unknown Channel',
     duration: null, views: null,
-    thumbnail: `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
+    thumbnail: `https://img.youtube.com/vi/${ytId}/maxresdefault.jpg`,
+    type:     'video',
   };
 }
 
@@ -276,9 +290,16 @@ async function fetchVideoInfo(videoId) {
 // ══════════════════════════════
 async function handleFetch() {
   const url = videoUrlInput.value.trim();
-  if (!url)  { showStatus('Please paste a YouTube URL first.'); videoPreview.classList.add('d-none'); return; }
-  const vid  = extractVideoId(url);
-  if (!vid)  { showStatus('Invalid YouTube URL. Please check and try again.'); videoPreview.classList.add('d-none'); return; }
+  if (!url)  { showStatus('Please paste a YouTube or Instagram URL first.'); videoPreview.classList.add('d-none'); return; }
+  
+  let isYouTube = url.includes('youtube.com') || url.includes('youtu.be') || extractVideoId(url);
+  let isInstagram = url.includes('instagram.com');
+  
+  if (!isYouTube && !isInstagram) {
+    showStatus('Unsupported URL. Please check your link and try again.');
+    videoPreview.classList.add('d-none');
+    return;
+  }
 
   fetchBtn.querySelector('.btn-fetch-text').classList.add('d-none');
   fetchBtn.querySelector('.btn-fetch-loader').classList.remove('d-none');
@@ -286,23 +307,61 @@ async function handleFetch() {
   hideStatus();
 
   try {
-    const info  = await fetchVideoInfo(vid);
-    currentVideoId = vid;
+    const info  = await fetchVideoInfo(url);
+    currentVideoId = url;
 
-    previewThumb.src            = info.thumbnail;
+    previewThumb.src            = info.thumbnail || '';
     previewTitle.textContent    = info.title;
     previewChannel.textContent  = info.channel;
     previewDuration.textContent = fmtDuration(info.duration);
     previewViews.textContent    = fmtViews(info.views);
-    previewThumb.onerror = () => { previewThumb.src = `https://img.youtube.com/vi/${vid}/hqdefault.jpg`; };
+    previewThumb.onerror = () => { 
+      previewThumb.src = isInstagram 
+        ? 'https://cdn-icons-png.flaticon.com/512/174/174855.png' 
+        : `https://img.youtube.com/vi/${extractVideoId(url)}/hqdefault.jpg`; 
+    };
 
-    const savedFormat = localStorage.getItem('yuvina_format') || 'mp4';
-    selectedFormat = ['mp4', 'mp3', 'webm'].includes(savedFormat) ? savedFormat : 'mp4';
+    const isImage = info.type === 'image';
+    const previewBadge = document.getElementById('previewBadge');
+    if (previewBadge) {
+      if (isInstagram) {
+        previewBadge.textContent = isImage ? 'Instagram Photo' : 'Instagram Video/Reel';
+      } else {
+        previewBadge.textContent = 'YouTube Video';
+      }
+    }
+
+    const tabMp4 = document.querySelector('.format-tab[data-type="mp4"]');
+    const tabMp3 = document.querySelector('.format-tab[data-type="mp3"]');
+    const tabWebm = document.querySelector('.format-tab[data-type="webm"]');
+    const tabJpg = document.getElementById('tabJpg');
+
+    if (isImage) {
+      if (tabMp4) tabMp4.classList.add('d-none');
+      if (tabMp3) tabMp3.classList.add('d-none');
+      if (tabWebm) tabWebm.classList.add('d-none');
+      if (tabJpg) tabJpg.classList.remove('d-none');
+      selectedFormat = 'jpg';
+    } else {
+      if (tabMp4) tabMp4.classList.remove('d-none');
+      if (tabMp3) tabMp3.classList.remove('d-none');
+      if (isInstagram) {
+        if (tabWebm) tabWebm.classList.add('d-none');
+      } else {
+        if (tabWebm) tabWebm.classList.remove('d-none');
+      }
+      if (tabJpg) tabJpg.classList.add('d-none');
+
+      const savedFormat = localStorage.getItem('yuvina_format') || 'mp4';
+      selectedFormat = ['mp4', 'mp3'].includes(savedFormat) ? savedFormat : 'mp4';
+      if (!isInstagram && savedFormat === 'webm') selectedFormat = 'webm';
+    }
+
     document.querySelectorAll('.format-tab').forEach(t => t.classList.toggle('active', t.dataset.type === selectedFormat));
     renderQualities(selectedFormat);
 
     videoPreview.classList.remove('d-none');
-    showStatus('✓ Video found! Choose your format and quality below.', 'success');
+    showStatus('✓ Media found! Choose your format and quality below.', 'success');
   } catch (err) {
     showStatus(err.message || 'Something went wrong.');
     videoPreview.classList.add('d-none');
@@ -316,7 +375,12 @@ async function handleFetch() {
 fetchBtn.addEventListener('click', handleFetch);
 videoUrlInput.addEventListener('keydown', e => { if (e.key === 'Enter') handleFetch(); });
 videoUrlInput.addEventListener('paste', () => {
-  setTimeout(() => { if (extractVideoId(videoUrlInput.value)) handleFetch(); }, 100);
+  setTimeout(() => {
+    const val = videoUrlInput.value.trim();
+    if (val.includes('youtube.com') || val.includes('youtu.be') || val.includes('instagram.com') || extractVideoId(val)) {
+      handleFetch();
+    }
+  }, 100);
 });
 
 // ══════════════════════════════
@@ -408,7 +472,7 @@ downloadBtn.addEventListener('click', async () => {
 
   try {
     // 1. Send download request to server to get task_id
-    const startUrl = `/api/download?id=${currentVideoId}` +
+    const startUrl = `/api/download?url=${encodeURIComponent(currentVideoId)}` +
                      `&format=${selectedFormat}` +
                      `&quality=${encodeURIComponent(selectedQuality)}`;
                      

@@ -25,8 +25,17 @@ YTDLP   = None   # resolved at startup
 
 # Global dictionary to hold active and completed download tasks
 DOWNLOAD_TASKS  = {}
-COOKIES_PATH    = None
-COOKIES_BROWSER = None
+COOKIES_PATH           = None
+COOKIES_BROWSER        = None
+INSTAGRAM_COOKIES_PATH = None
+
+def get_target_url(params):
+    url_param = params.get('url', '')
+    if not url_param:
+        vid = params.get('id', '')
+        if vid:
+            url_param = f'https://www.youtube.com/watch?v={vid}'
+    return url_param.strip()
 
 def normalize_cookies(raw_content):
     raw_content = raw_content.strip()
@@ -94,31 +103,29 @@ def normalize_cookies(raw_content):
     # Fallback: Just return it as-is
     return raw_content
 
-def get_cookies_args():
-    if COOKIES_PATH:
-        return ['--cookies', COOKIES_PATH]
-    elif COOKIES_BROWSER:
-        return ['--cookies-from-browser', COOKIES_BROWSER]
+def get_cookies_args(url=""):
+    if "instagram.com" in url:
+        if INSTAGRAM_COOKIES_PATH:
+            return ['--cookies', INSTAGRAM_COOKIES_PATH]
+        elif COOKIES_BROWSER:
+            return ['--cookies-from-browser', COOKIES_BROWSER]
+    else:
+        if COOKIES_PATH:
+            return ['--cookies', COOKIES_PATH]
+        elif COOKIES_BROWSER:
+            return ['--cookies-from-browser', COOKIES_BROWSER]
     return []
 
-def build_ytdlp_base_args():
-    """Return common yt-dlp anti-bot and compatibility flags.
-
-    'android' and 'android_vr' player clients do NOT require PO Tokens and
-    work on cloud hosting IPs (Render, Railway, Fly.io, etc.).
-    'ios' / 'web' require GVS PO Tokens since yt-dlp v2024.11+ and fail
-    on live servers without them.
-
-    However, some clients (like android_vr) do not support cookies, and forcing
-    them bypasses/ignores the cookies we loaded. If cookies are present, we let
-    yt-dlp use its default clients (web, mweb, android, ios) so cookies can
-    authenticate the requests.
-    """
+def build_ytdlp_base_args(url=""):
+    """Return common yt-dlp anti-bot and compatibility flags."""
     args = [
         '--no-check-certificates',
         '--add-header', 'Accept-Language:en-US,en;q=0.9',
         '--socket-timeout', '30',
     ]
+    if "instagram.com" in url:
+        return args
+
     if not (COOKIES_PATH or COOKIES_BROWSER):
         args += ['--extractor-args', 'youtube:player_client=android,android_vr']
     return args
@@ -282,7 +289,12 @@ def download_deno():
 
 
 # ── Quality string → yt-dlp format ────────────────────
-def build_format(format_type, quality_str, ffmpeg_available=True):
+def build_format(url, format_type, quality_str, ffmpeg_available=True):
+    if "instagram.com" in url:
+        if format_type == 'mp3':
+            return 'bestaudio/best', ['-x', '--audio-format', 'mp3']
+        return 'best', []
+
     if format_type == 'mp3':
         kbps  = int(re.search(r'\d+', quality_str).group()) if re.search(r'\d+', quality_str) else 128
         aq    = {320: '0', 256: '2', 192: '4', 128: '5'}.get(kbps, '5')
@@ -315,13 +327,13 @@ def mime_for(fmt):
 
 
 # ── Background download task executor ───────────────────
-def run_download_task(task_id, vid, fmt, quality):
+def run_download_task(task_id, url, fmt, quality):
     task = DOWNLOAD_TASKS[task_id]
     task["status"] = "downloading"
     task["phase"] = "Initializing download..."
 
     ffmpeg_available = check_ffmpeg_available()
-    yt_fmt, extra = build_format(fmt, quality, ffmpeg_available)
+    yt_fmt, extra = build_format(url, fmt, quality, ffmpeg_available)
 
     if fmt == 'mp3' and not ffmpeg_available:
         task["status"] = "failed"
@@ -336,17 +348,17 @@ def run_download_task(task_id, vid, fmt, quality):
     task["temp_dir_obj"] = tmpdir_obj
     tmpdir = tmpdir_obj.name
 
-    cookies_args = get_cookies_args()
+    cookies_args = get_cookies_args(url)
     out_tmpl = os.path.join(tmpdir, 'YuvinaLoad_%(title)s.%(ext)s')
-    cmd = YTDLP + cookies_args + build_ytdlp_base_args() + [
+    cmd = YTDLP + cookies_args + build_ytdlp_base_args(url) + [
         '--no-config',
         '-f', yt_fmt,
         '-o', out_tmpl,
         '--no-playlist',
         '--restrict-filenames',
-    ] + extra + [f'https://www.youtube.com/watch?v={vid}']
+    ] + extra + [url]
 
-    print(f'  ⬇  [Task {task_id[:8]}] Downloading {vid} [{fmt} {quality}]')
+    print(f'  ⬇  [Task {task_id[:8]}] Downloading {url} [{fmt} {quality}]')
     try:
         p = subprocess.Popen(
             cmd,
@@ -490,6 +502,10 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
         if COOKIES_PATH:    cookie_status = 'cookies_file'
         elif COOKIES_BROWSER: cookie_status = f'browser:{COOKIES_BROWSER}'
         
+        insta_cookie_status = 'none'
+        if INSTAGRAM_COOKIES_PATH: insta_cookie_status = 'cookies_file'
+        elif COOKIES_BROWSER:      insta_cookie_status = f'browser:{COOKIES_BROWSER}'
+        
         # Check JS runtime
         js_status = 'none'
         for cmd in ['deno', 'node']:
@@ -511,12 +527,13 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
                         pass
 
         self.json({
-            'status':        'ok',
-            'ytdlp':         bool(YTDLP),
-            'cookies':       cookie_status,
-            'js_runtime':    js_status,
-            'cloud_mode':    is_cloud,
-            'warning':       (
+            'status':            'ok',
+            'ytdlp':             bool(YTDLP),
+            'cookies':           cookie_status,
+            'cookies_instagram': insta_cookie_status,
+            'js_runtime':        js_status,
+            'cloud_mode':        is_cloud,
+            'warning':           (
                 'No cookies configured. YouTube bot-block is likely on cloud deployments. '
                 'Set the YOUTUBE_COOKIES environment variable in your hosting dashboard.'
             ) if is_cloud and cookie_status == 'none' else None,
@@ -524,42 +541,48 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
 
     # ── /api/info ─────────────────────────────────────
     def api_info(self, params):
-        vid = params.get('id', '')
-        if not vid:
-            self.json({'error': 'Missing ?id='}, 400); return
+        url = get_target_url(params)
+        if not url:
+            self.json({'error': 'Missing ?url= or ?id='}, 400); return
         if not YTDLP:
             self.json({'error': 'yt-dlp not found'}, 500); return
 
         try:
-            cookies_args = get_cookies_args()
+            cookies_args = get_cookies_args(url)
             r = subprocess.run(
-                YTDLP + cookies_args + build_ytdlp_base_args() + [
+                YTDLP + cookies_args + build_ytdlp_base_args(url) + [
                     '--no-config', '--dump-json', '--no-playlist', '--skip-download',
-                    f'https://www.youtube.com/watch?v={vid}',
+                    url,
                 ],
                 capture_output=True, text=True, timeout=45
             )
             if r.returncode != 0:
                 print(f"[YuvinaLoad Error] yt-dlp stderr: {r.stderr}")
-                err_msg = "Video unavailable, private, or blocked by YouTube"
+                err_msg = "Media unavailable, private, or blocked by platform"
                 if "429" in r.stderr or "Too Many Requests" in r.stderr:
-                    err_msg = "YouTube rate-limited this server IP (HTTP 429)"
+                    err_msg = "Rate-limited by platform (HTTP 429)"
                 elif "Sign in" in r.stderr or "confirm you're not a bot" in r.stderr:
-                    err_msg = ("YouTube blocked this request (Bot detection).<br><br>"
+                    err_msg = ("Bot detection block triggered.<br><br>"
                                "<b>To fix this:</b><br>"
-                               "• <b>For local runs</b>: Set <code>YOUTUBE_COOKIES_BROWSER=chrome</code> (or edge, firefox) in <code>start.bat</code> and restart.<br>"
-                               "• <b>For live deployments (Render, Railway, etc.)</b>: Export YouTube cookies using a browser extension (like 'Get cookies.txt LOCALLY'), copy the file contents, and add it as the <code>YOUTUBE_COOKIES</code> environment variable in your dashboard settings.")
+                               "• <b>For YouTube</b>: Export cookies using an extension and set <code>YOUTUBE_COOKIES</code> env variable.<br>"
+                               "• <b>For Instagram</b>: Export cookies and set <code>INSTAGRAM_COOKIES</code> env variable in your dashboard settings.")
                 
                 details = r.stderr.strip().split('\n')[-1] if r.stderr else "Unknown error"
                 self.json({'error': f"{err_msg}. Details: {details}"}, 404); return
 
             d = json.loads(r.stdout)
+            media_type = 'video'
+            ext = d.get('ext', '').lower()
+            if ext in ['jpg', 'jpeg', 'png', 'webp'] or (d.get('vcodec') == 'none' and d.get('acodec') == 'none'):
+                media_type = 'image'
+
             self.json({
                 'title':      d.get('title',      'Unknown'),
                 'channel':    d.get('uploader',   'Unknown'),
                 'duration':   d.get('duration',   0),
                 'thumbnail':  d.get('thumbnail',  ''),
                 'view_count': d.get('view_count', 0),
+                'type':       media_type,
             })
         except subprocess.TimeoutExpired:
             self.json({'error': 'Timed out fetching info'}, 504)
@@ -568,12 +591,12 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
 
     # ── /api/download ─────────────────────────────────
     def api_download(self, params):
-        vid      = params.get('id',      '')
+        url = get_target_url(params)
         fmt      = params.get('format',  'mp4')
         quality  = params.get('quality', '720p')
 
-        if not vid:
-            self.json({'error': 'Missing ?id='}, 400); return
+        if not url:
+            self.json({'error': 'Missing ?url= or ?id='}, 400); return
         if not YTDLP:
             self.json({'error': 'yt-dlp not installed. Please restart via start.bat'}, 500); return
 
@@ -607,7 +630,7 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
         }
 
         # Spawn background thread to run yt-dlp
-        t = threading.Thread(target=run_download_task, args=(task_id, vid, fmt, quality))
+        t = threading.Thread(target=run_download_task, args=(task_id, url, fmt, quality))
         t.daemon = True
         t.start()
 
@@ -674,7 +697,7 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
 #  Entry Point
 # ══════════════════════════════════════════════════════
 def main():
-    global YTDLP, COOKIES_PATH, COOKIES_BROWSER
+    global YTDLP, COOKIES_PATH, COOKIES_BROWSER, INSTAGRAM_COOKIES_PATH
 
     # Load cookies from environment variables or local file
     env_cookies = os.environ.get('YOUTUBE_COOKIES')
@@ -694,7 +717,7 @@ def main():
             temp_cookies.write(normalized_cookies)
             temp_cookies.close()
             COOKIES_PATH = temp_cookies.name
-            print(f"  [Cookies] Loaded cookies from YOUTUBE_COOKIES environment variable!")
+            print(f"  [Cookies] Loaded YouTube cookies from YOUTUBE_COOKIES environment variable!")
             
             # Clean up temp file on shutdown
             import atexit
@@ -709,12 +732,42 @@ def main():
         local_cookies = os.path.join(WEBROOT, 'cookies.txt')
         if os.path.exists(local_cookies):
             COOKIES_PATH = local_cookies
-            print("  [Cookies] Loaded cookies from local cookies.txt file!")
+            print("  [Cookies] Loaded YouTube cookies from local cookies.txt file!")
         else:
             env_cookies_browser = os.environ.get('YOUTUBE_COOKIES_BROWSER')
             if env_cookies_browser:
                 COOKIES_BROWSER = env_cookies_browser.strip().lower()
                 print(f"  [Cookies] Configured to use cookies from browser: {COOKIES_BROWSER}")
+
+    # Load Instagram cookies from environment variables or local file
+    env_insta_cookies = os.environ.get('INSTAGRAM_COOKIES')
+    if env_insta_cookies:
+        try:
+            if '\\n' in env_insta_cookies:
+                env_insta_cookies = env_insta_cookies.replace('\\n', '\n')
+            if '\\t' in env_insta_cookies:
+                env_insta_cookies = env_insta_cookies.replace('\\t', '\t')
+
+            normalized_insta = normalize_cookies(env_insta_cookies)
+            temp_insta_cookies = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8')
+            temp_insta_cookies.write(normalized_insta)
+            temp_insta_cookies.close()
+            INSTAGRAM_COOKIES_PATH = temp_insta_cookies.name
+            print(f"  [Cookies] Loaded Instagram cookies from INSTAGRAM_COOKIES environment variable!")
+            
+            import atexit
+            def cleanup_insta_cookies():
+                if os.path.exists(temp_insta_cookies.name):
+                    try: os.remove(temp_insta_cookies.name)
+                    except: pass
+            atexit.register(cleanup_insta_cookies)
+        except Exception as e:
+            print(f"  [Cookies] ❌ Failed to write INSTAGRAM_COOKIES: {e}")
+    else:
+        local_insta_cookies = os.path.join(WEBROOT, 'instagram_cookies.txt')
+        if os.path.exists(local_insta_cookies):
+            INSTAGRAM_COOKIES_PATH = local_insta_cookies
+            print("  [Cookies] Loaded Instagram cookies from local instagram_cookies.txt file!")
 
     # Reconfigure stdout/stderr to UTF-8 on Windows to prevent UnicodeEncodeError
     if sys.platform.startswith('win'):

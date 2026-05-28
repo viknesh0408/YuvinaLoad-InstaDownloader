@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   
   <!-- Primary SEO Meta Tags -->
-  <title>YuvinaLoad – Premium YouTube Video Downloader</title>
-  <meta name="title" content="YuvinaLoad – Premium YouTube Video Downloader" />
-  <meta name="description" content="YuvinaLoad is the fastest and most beautiful YouTube video downloader. Save any YouTube video in full HD, 4K, or extract high-quality MP3 audio for free." />
+  <title>YuvinaLoad – Premium YouTube &amp; Instagram Downloader</title>
+  <meta name="title" content="YuvinaLoad – Premium YouTube &amp; Instagram Downloader" />
+  <meta name="description" content="YuvinaLoad is the fastest and most beautiful downloader for YouTube and Instagram. Save any video in full HD, 4K, Reels, or images for free." />
   <meta name="keywords" content="youtube downloader, download youtube video, youtube to mp4, youtube to mp3, 4k youtube downloader, free video downloader, online video downloader, no watermark, secure video downloader" />
   <meta name="robots" content="index, follow" />
   <meta name="language" content="English" />
@@ -16,16 +16,16 @@
   <!-- Open Graph / Facebook Meta Tags -->
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://yuvinaload.onrender.com/" />
-  <meta property="og:title" content="YuvinaLoad – Premium YouTube Video Downloader" />
-  <meta property="og:description" content="Download YouTube videos in HD, 4K, and MP3 for free. Blazing fast, secure, and unlimited downloads." />
+  <meta property="og:title" content="YuvinaLoad – Premium YouTube &amp; Instagram Downloader" />
+  <meta property="og:description" content="Download YouTube &amp; Instagram videos/images in HD, 4K, and MP3 for free. Blazing fast, secure, and unlimited downloads." />
   <meta property="og:image" content="https://yuvinaload.onrender.com/assets/hero-bg.png" />
   <meta property="og:site_name" content="YuvinaLoad" />
   
   <!-- Twitter Meta Tags -->
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:url" content="https://yuvinaload.onrender.com/" />
-  <meta name="twitter:title" content="YuvinaLoad – Premium YouTube Video Downloader" />
-  <meta name="twitter:description" content="Download YouTube videos in HD, 4K, and MP3 for free. Blazing fast, secure, and unlimited downloads." />
+  <meta name="twitter:title" content="YuvinaLoad – Premium YouTube &amp; Instagram Downloader" />
+  <meta name="twitter:description" content="Download YouTube &amp; Instagram videos/images in HD, 4K, and MP3 for free. Blazing fast, secure, and unlimited downloads." />
   <meta name="twitter:image" content="https://yuvinaload.onrender.com/assets/hero-bg.png" />
 
   <!-- Favicon -->
@@ -89,11 +89,11 @@
       </div>
 
       <h1 class="hero-title">
-        Download YouTube Videos<br />
-        <span class="gradient-text">Like Never Before</span>
+        Download Videos &amp; Images<br />
+        <span class="gradient-text">From YouTube &amp; Instagram</span>
       </h1>
       <p class="hero-subtitle">
-        Save any YouTube video in HD, 4K, or MP3 in seconds.<br class="d-none d-md-block"/>
+        Save any YouTube/Instagram video, Reels, or photos in seconds.<br class="d-none d-md-block"/>
         No registration. No watermark. Zero cost.
       </p>
 
@@ -106,7 +106,7 @@
               type="text"
               id="videoUrl"
               class="url-input"
-              placeholder="Paste YouTube URL here…"
+              placeholder="Paste YouTube or Instagram URL here…"
               autocomplete="off"
             />
             <button class="paste-btn" id="pasteBtn" title="Paste from clipboard">
@@ -132,7 +132,7 @@
               </div>
             </div>
             <div class="preview-meta">
-              <span class="preview-badge">YouTube Video</span>
+              <span class="preview-badge" id="previewBadge">YouTube Video</span>
               <h3 class="preview-title" id="previewTitle">Loading title…</h3>
               <div class="preview-details">
                 <span><i class="bi bi-person-fill"></i> <span id="previewChannel">—</span></span>
@@ -154,6 +154,9 @@
               </button>
               <button class="format-tab" data-type="webm">
                 <i class="bi bi-file-earmark-play-fill"></i> WEBM
+              </button>
+              <button class="format-tab d-none" data-type="jpg" id="tabJpg">
+                <i class="bi bi-image-fill"></i> JPG
               </button>
             </div>
 
