@@ -187,6 +187,74 @@ def download_ffmpeg():
         return False
 
 
+# ── Check if JS runtime is available for yt-dlp ────────
+def check_js_runtime_available():
+    # 1. Check if node or deno is in PATH
+    for cmd in ['deno', 'node']:
+        try:
+            subprocess.run([cmd, '--version'], capture_output=True, check=True)
+            return True
+        except Exception:
+            pass
+    # 2. Check if local deno or deno.exe exists in project root
+    local_deno = os.path.join(WEBROOT, 'deno.exe' if sys.platform.startswith('win') else 'deno')
+    if os.path.exists(local_deno):
+        return True
+    return False
+
+
+# ── Download Deno automatically if missing JS runtime ──
+def download_deno():
+    import urllib.request
+    import zipfile
+    import io
+    import stat
+
+    # Determine platform
+    if sys.platform.startswith('win'):
+        url = "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip"
+        dest_filename = "deno.exe"
+    elif sys.platform.startswith('darwin'):
+        url = "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-apple-darwin.zip"
+        dest_filename = "deno"
+    else:
+        # Assume linux x64
+        url = "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip"
+        dest_filename = "deno"
+
+    print('\n ╔════════════════════════════════════════════════════════╗')
+    print(' ║  yt-dlp requires a JS runtime (Deno) to sign players   ║')
+    print(' ║  and download high-quality videos without errors.     ║')
+    print(' ║  Downloading portable Deno binary (~30MB)...          ║')
+    print(' ╚════════════════════════════════════════════════════════╝\n')
+
+    try:
+        req = urllib.request.Request(
+            url, 
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        )
+        with urllib.request.urlopen(req, timeout=120) as response:
+            zip_data = response.read()
+        
+        print("  [Deno] Extracting binary...")
+        with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
+            z.extract(dest_filename, WEBROOT)
+        
+        # On Linux/macOS, make the downloaded binary executable
+        if not sys.platform.startswith('win'):
+            dest_path = os.path.join(WEBROOT, dest_filename)
+            st = os.stat(dest_path)
+            os.chmod(dest_path, st.st_mode | stat.S_IEXEC)
+
+        print("  [Deno] ✅ Deno installed successfully in project directory!\n")
+        return True
+    except Exception as e:
+        print(f"  [Deno] ❌ Auto-install failed: {e}")
+        print("         yt-dlp might fail to download some formats.\n")
+        return False
+
+
+
 # ── Quality string → yt-dlp format ────────────────────
 def build_format(format_type, quality_str, ffmpeg_available=True):
     if format_type == 'mp3':
@@ -619,6 +687,10 @@ def main():
     # Automatically check and download FFmpeg if running on Windows and missing
     if sys.platform.startswith('win') and not check_ffmpeg_available():
         download_ffmpeg()
+
+    # Automatically check and download Deno if missing a JS runtime (needed by yt-dlp)
+    if not check_js_runtime_available():
+        download_deno()
 
     # Proactively upgrade yt-dlp to latest version if running on Render/Railway/etc.
     # to avoid using outdated cached versions of yt-dlp from the deployment server cache
