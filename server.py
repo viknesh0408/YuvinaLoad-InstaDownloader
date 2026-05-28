@@ -189,17 +189,24 @@ def download_ffmpeg():
 
 # ── Check if JS runtime is available for yt-dlp ────────
 def check_js_runtime_available():
-    # 1. Check if node or deno is in PATH
+    # 1. Check if node or deno is in PATH (this includes temp directories if already added)
     for cmd in ['deno', 'node']:
         try:
             subprocess.run([cmd, '--version'], capture_output=True, check=True)
             return True
         except Exception:
             pass
-    # 2. Check if local deno or deno.exe exists in project root
-    local_deno = os.path.join(WEBROOT, 'deno.exe' if sys.platform.startswith('win') else 'deno')
-    if os.path.exists(local_deno):
-        return True
+    # 2. Check if local deno exists in project root or temp directory
+    for d in [WEBROOT, tempfile.gettempdir()]:
+        local_deno = os.path.join(d, 'deno.exe' if sys.platform.startswith('win') else 'deno')
+        if os.path.exists(local_deno):
+            try:
+                subprocess.run([local_deno, '--version'], capture_output=True, check=True)
+                if d not in os.environ['PATH']:
+                    os.environ['PATH'] = d + os.pathsep + os.environ['PATH']
+                return True
+            except Exception:
+                pass
     return False
 
 
@@ -236,18 +243,37 @@ def download_deno():
         with urllib.request.urlopen(req, timeout=120) as response:
             zip_data = response.read()
         
-        print("  [Deno] Extracting binary...")
-        with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
-            z.extract(dest_filename, WEBROOT)
+        # Try writing to WEBROOT first, fallback to temp directory if read-only filesystem
+        write_dirs = [WEBROOT, tempfile.gettempdir()]
+        success = False
         
-        # On Linux/macOS, make the downloaded binary executable
-        if not sys.platform.startswith('win'):
-            dest_path = os.path.join(WEBROOT, dest_filename)
-            st = os.stat(dest_path)
-            os.chmod(dest_path, st.st_mode | stat.S_IEXEC)
-
-        print("  [Deno] ✅ Deno installed successfully in project directory!\n")
-        return True
+        for write_dir in write_dirs:
+            try:
+                dest_path = os.path.join(write_dir, dest_filename)
+                print(f"  [Deno] Extracting binary to: {write_dir}...")
+                with zipfile.ZipFile(io.BytesIO(zip_data)) as z:
+                    z.extract(dest_filename, write_dir)
+                
+                # On Linux/macOS, make the downloaded binary executable
+                if not sys.platform.startswith('win'):
+                    st = os.stat(dest_path)
+                    os.chmod(dest_path, st.st_mode | stat.S_IEXEC)
+                
+                # Test execution of Deno to verify it runs
+                subprocess.run([dest_path, '--version'], capture_output=True, check=True)
+                
+                # Add this directory to PATH if not already there
+                if write_dir not in os.environ['PATH']:
+                    os.environ['PATH'] = write_dir + os.pathsep + os.environ['PATH']
+                
+                print(f"  [Deno] ✅ Deno installed successfully in {write_dir}!\n")
+                success = True
+                break
+            except Exception as ex:
+                print(f"  [Deno] ⚠  Failed to install in {write_dir}: {ex}")
+                continue
+                
+        return success
     except Exception as e:
         print(f"  [Deno] ❌ Auto-install failed: {e}")
         print("         yt-dlp might fail to download some formats.\n")
@@ -463,10 +489,32 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
         cookie_status = 'none'
         if COOKIES_PATH:    cookie_status = 'cookies_file'
         elif COOKIES_BROWSER: cookie_status = f'browser:{COOKIES_BROWSER}'
+        
+        # Check JS runtime
+        js_status = 'none'
+        for cmd in ['deno', 'node']:
+            try:
+                subprocess.run([cmd, '--version'], capture_output=True, check=True)
+                js_status = cmd
+                break
+            except Exception:
+                pass
+        if js_status == 'none':
+            for d in [WEBROOT, tempfile.gettempdir()]:
+                local_deno = os.path.join(d, 'deno.exe' if sys.platform.startswith('win') else 'deno')
+                if os.path.exists(local_deno):
+                    try:
+                        subprocess.run([local_deno, '--version'], capture_output=True, check=True)
+                        js_status = 'local_deno'
+                        break
+                    except Exception:
+                        pass
+
         self.json({
             'status':        'ok',
             'ytdlp':         bool(YTDLP),
             'cookies':       cookie_status,
+            'js_runtime':    js_status,
             'cloud_mode':    is_cloud,
             'warning':       (
                 'No cookies configured. YouTube bot-block is likely on cloud deployments. '
@@ -676,9 +724,11 @@ def main():
         except Exception:
             pass
 
-    # Add project directory to PATH so local ffmpeg.exe can be discovered by yt-dlp
-    if WEBROOT not in os.environ['PATH']:
-        os.environ['PATH'] = WEBROOT + os.pathsep + os.environ['PATH']
+    # Add project directory and temp directory to PATH so local tools can be discovered
+    temp_dir = tempfile.gettempdir()
+    for d in [WEBROOT, temp_dir]:
+        if d not in os.environ['PATH']:
+            os.environ['PATH'] = d + os.pathsep + os.environ['PATH']
 
     print('\n ╔════════════════════════════════════════╗')
     print(' ║   YuvinaLoad  –  Local Download Server  ║')
