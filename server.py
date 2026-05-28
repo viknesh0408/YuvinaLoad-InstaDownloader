@@ -39,14 +39,15 @@ def build_ytdlp_base_args():
     """Return common yt-dlp anti-bot and compatibility flags.
 
     'android' and 'android_vr' player clients do NOT require PO Tokens and
-    are not blocked by YouTube's bot-detection on cloud hosting IPs (Render,
-    Railway, Fly.io, etc.).  Using 'ios' or 'web' requires GVS PO Tokens
-    since yt-dlp v2024.11+ and will fail on live servers without them.
+    work on cloud hosting IPs (Render, Railway, Fly.io, etc.).
+    'ios' / 'web' require GVS PO Tokens since yt-dlp v2024.11+ and fail
+    on live servers without them.
     """
     return [
         '--extractor-args', 'youtube:player_client=android,android_vr',
         '--no-check-certificates',
         '--add-header', 'Accept-Language:en-US,en;q=0.9',
+        '--socket-timeout', '30',
     ]
 
 
@@ -305,6 +306,7 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
         elif parsed.path == '/api/download':        self.api_download(params)
         elif parsed.path == '/api/download/status': self.api_download_status(params)
         elif parsed.path == '/api/download/file':   self.api_download_file(params)
+        elif parsed.path == '/api/health':          self.api_health()
         else:                                       super().do_GET()
 
     def do_OPTIONS(self):
@@ -312,6 +314,23 @@ class YuvinaHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Origin',  '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
         self.end_headers()
+
+    # ── /api/health ────────────────────────────────────
+    def api_health(self):
+        is_cloud = bool(os.environ.get('PORT'))  # Render/Railway set PORT env var
+        cookie_status = 'none'
+        if COOKIES_PATH:    cookie_status = 'cookies_file'
+        elif COOKIES_BROWSER: cookie_status = f'browser:{COOKIES_BROWSER}'
+        self.json({
+            'status':        'ok',
+            'ytdlp':         bool(YTDLP),
+            'cookies':       cookie_status,
+            'cloud_mode':    is_cloud,
+            'warning':       (
+                'No cookies configured. YouTube bot-block is likely on cloud deployments. '
+                'Set the YOUTUBE_COOKIES environment variable in your hosting dashboard.'
+            ) if is_cloud and cookie_status == 'none' else None,
+        })
 
     # ── /api/info ─────────────────────────────────────
     def api_info(self, params):
